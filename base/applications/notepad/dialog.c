@@ -4,6 +4,7 @@
  *  Copyright 1998,99 Marcel Baur <mbaur@g26.ethz.ch>
  *  Copyright 2002 Sylvain Petreolle <spetreolle@yahoo.fr>
  *  Copyright 2002 Andriy Palamarchuk
+ *  Copyright 2023 Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -164,6 +165,13 @@ static VOID DIALOG_StatusBarUpdateEncoding(VOID)
     SendMessageW(Globals.hStatusBar, SB_SETTEXTW, SBPART_ENCODING, (LPARAM)szText);
 }
 
+static VOID DIALOG_StatusBarUpdateAll(VOID)
+{
+    DIALOG_StatusBarUpdateCaretPos();
+    DIALOG_StatusBarUpdateLineEndings();
+    DIALOG_StatusBarUpdateEncoding();
+}
+
 int DIALOG_StringMsgBox(HWND hParent, int formatId, LPCTSTR szString, DWORD dwFlags)
 {
     TCHAR szMessage[MAX_STRING_LEN];
@@ -219,13 +227,7 @@ static void AlertPrintError(void)
  */
 BOOL FileExists(LPCTSTR szFilename)
 {
-    WIN32_FIND_DATA entry;
-    HANDLE hFile;
-
-    hFile = FindFirstFile(szFilename, &entry);
-    FindClose(hFile);
-
-    return (hFile != INVALID_HANDLE_VALUE);
+    return GetFileAttributes(szFilename) != INVALID_FILE_ATTRIBUTES;
 }
 
 BOOL HasFileExtension(LPCTSTR szFilename)
@@ -240,68 +242,41 @@ BOOL HasFileExtension(LPCTSTR szFilename)
 
 int GetSelectionTextLength(HWND hWnd)
 {
-    DWORD dwStart = 0;
-    DWORD dwEnd = 0;
-
+    DWORD dwStart = 0, dwEnd = 0;
     SendMessage(hWnd, EM_GETSEL, (WPARAM)&dwStart, (LPARAM)&dwEnd);
-
     return dwEnd - dwStart;
 }
 
 int GetSelectionText(HWND hWnd, LPTSTR lpString, int nMaxCount)
 {
-    DWORD dwStart = 0;
-    DWORD dwEnd = 0;
-    DWORD dwSize;
-    HRESULT hResult;
-    LPTSTR lpTemp;
-
-    if (!lpString)
-    {
-        return 0;
-    }
+    DWORD dwStart = 0, dwEnd = 0;
+    INT cchText = GetWindowTextLength(hWnd);
+    LPTSTR pszText;
+    HLOCAL hLocal;
+    HRESULT hr;
 
     SendMessage(hWnd, EM_GETSEL, (WPARAM)&dwStart, (LPARAM)&dwEnd);
-
-    if (dwStart == dwEnd)
-    {
+    if (!lpString || dwStart == dwEnd || cchText == 0)
         return 0;
-    }
 
-    dwSize = GetWindowTextLength(hWnd) + 1;
-    lpTemp = HeapAlloc(GetProcessHeap(), 0, dwSize * sizeof(TCHAR));
-    if (!lpTemp)
-    {
+    hLocal = (HLOCAL)SendMessage(hWnd, EM_GETHANDLE, 0, 0);
+    pszText = (LPTSTR)LocalLock(hLocal);
+    if (!pszText)
         return 0;
-    }
 
-    dwSize = GetWindowText(hWnd, lpTemp, dwSize);
+    hr = StringCchCopyN(lpString, nMaxCount, pszText + dwStart, dwEnd - dwStart);
+    LocalUnlock(hLocal);
 
-    if (!dwSize)
-    {
-        HeapFree(GetProcessHeap(), 0, lpTemp);
-        return 0;
-    }
-
-    hResult = StringCchCopyN(lpString, nMaxCount, lpTemp + dwStart, dwEnd - dwStart);
-    HeapFree(GetProcessHeap(), 0, lpTemp);
-
-    switch (hResult)
+    switch (hr)
     {
         case S_OK:
-        {
             return dwEnd - dwStart;
-        }
 
         case STRSAFE_E_INSUFFICIENT_BUFFER:
-        {
             return nMaxCount - 1;
-        }
 
         default:
-        {
             return 0;
-        }
     }
 }
 
@@ -332,48 +307,46 @@ GetPrintingRect(HDC hdc, RECT margins)
 
 static BOOL DoSaveFile(VOID)
 {
-    BOOL bRet = TRUE;
+    BOOL bRet = FALSE;
     HANDLE hFile;
-    LPTSTR pTemp;
-    DWORD size;
+    DWORD cchText;
 
-    hFile = CreateFile(Globals.szFileName, GENERIC_WRITE, FILE_SHARE_WRITE,
-                       NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if(hFile == INVALID_HANDLE_VALUE)
+    hFile = CreateFileW(Globals.szFileName, GENERIC_WRITE, FILE_SHARE_WRITE,
+                        NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
     {
         ShowLastError();
         return FALSE;
     }
 
-    size = GetWindowTextLength(Globals.hEdit) + 1;
-    pTemp = HeapAlloc(GetProcessHeap(), 0, size * sizeof(*pTemp));
-    if (!pTemp)
+    cchText = GetWindowTextLengthW(Globals.hEdit);
+    if (cchText <= 0)
     {
-        CloseHandle(hFile);
-        ShowLastError();
-        return FALSE;
+        bRet = TRUE;
     }
-    size = GetWindowText(Globals.hEdit, pTemp, size);
-
-    if (size)
+    else
     {
-        if (!WriteText(hFile, (LPWSTR)pTemp, size, Globals.encFile, Globals.iEoln))
+        HLOCAL hLocal = (HLOCAL)SendMessageW(Globals.hEdit, EM_GETHANDLE, 0, 0);
+        LPWSTR pszText = LocalLock(hLocal);
+        if (pszText)
         {
-            ShowLastError();
-            bRet = FALSE;
+            bRet = WriteText(hFile, pszText, cchText, Globals.encFile, Globals.iEoln);
+            if (!bRet)
+                ShowLastError();
+
+            LocalUnlock(hLocal);
         }
         else
         {
-            SendMessage(Globals.hEdit, EM_SETMODIFY, FALSE, 0);
-            bRet = TRUE;
+            ShowLastError();
         }
     }
 
     CloseHandle(hFile);
-    HeapFree(GetProcessHeap(), 0, pTemp);
 
     if (bRet)
     {
+        SendMessage(Globals.hEdit, EM_SETMODIFY, FALSE, 0);
         SetFileName(Globals.szFileName);
     }
 
@@ -404,8 +377,6 @@ BOOL DoCloseFile(VOID)
                 break;
 
             case IDCANCEL:
-                return FALSE;
-
             default:
                 return FALSE;
         }
@@ -462,10 +433,7 @@ VOID DoOpenFile(LPCTSTR szFileName)
     SetFileName(szFileName);
     UpdateWindowCaption(TRUE);
     NOTEPAD_EnableSearchMenu();
-
-    /* Update line endings and encoding on the status bar */
-    DIALOG_StatusBarUpdateLineEndings();
-    DIALOG_StatusBarUpdateEncoding();
+    DIALOG_StatusBarUpdateAll();
 
 done:
     if (hFile != INVALID_HANDLE_VALUE)
@@ -475,12 +443,16 @@ done:
 VOID DIALOG_FileNew(VOID)
 {
     /* Close any files and prompt to save changes */
-    if (DoCloseFile()) {
-        SetWindowText(Globals.hEdit, empty_str);
-        SendMessage(Globals.hEdit, EM_EMPTYUNDOBUFFER, 0, 0);
-        SetFocus(Globals.hEdit);
-        NOTEPAD_EnableSearchMenu();
-    }
+    if (!DoCloseFile())
+        return;
+
+    SetWindowText(Globals.hEdit, NULL);
+    SendMessage(Globals.hEdit, EM_EMPTYUNDOBUFFER, 0, 0);
+    Globals.iEoln = EOLN_CRLF;
+    Globals.encFile = ENCODING_DEFAULT;
+
+    NOTEPAD_EnableSearchMenu();
+    DIALOG_StatusBarUpdateAll();
 }
 
 VOID DIALOG_FileNewWindow(VOID)
@@ -627,11 +599,7 @@ BOOL DIALOG_FileSaveAs(VOID)
         if (DoSaveFile())
         {
             UpdateWindowCaption(TRUE);
-            
-            /* Update line endings and encoding on the status bar */
-            DIALOG_StatusBarUpdateLineEndings();
-            DIALOG_StatusBarUpdateEncoding();
-            
+            DIALOG_StatusBarUpdateAll();
             return TRUE;
         }
         else
@@ -912,17 +880,13 @@ VOID DIALOG_EditTimeDate(VOID)
     SendMessage(Globals.hEdit, EM_REPLACESEL, TRUE, (LPARAM)szText);
 }
 
-VOID DoCreateStatusBar(VOID)
+VOID DoShowHideStatusBar(VOID)
 {
-    RECT rc;
-    RECT rcstatus;
-    BOOL bStatusBarVisible;
-
     /* Check if status bar object already exists. */
-    if (Globals.hStatusBar == NULL)
+    if (Globals.bShowStatusBar && Globals.hStatusBar == NULL)
     {
         /* Try to create the status bar */
-        Globals.hStatusBar = CreateStatusWindow(WS_CHILD | WS_VISIBLE | CCS_BOTTOM | SBARS_SIZEGRIP,
+        Globals.hStatusBar = CreateStatusWindow(WS_CHILD | CCS_BOTTOM | SBARS_SIZEGRIP,
                                                 NULL,
                                                 Globals.hMainWnd,
                                                 CMD_STATUSBAR_WND_ID);
@@ -937,61 +901,17 @@ VOID DoCreateStatusBar(VOID)
         LoadString(Globals.hInstance, STRING_LINE_COLUMN, Globals.szStatusBarLineCol, MAX_PATH - 1);
     }
 
-    /* Set status bar visiblity according to the settings. */
-    if ((Globals.bWrapLongLines != FALSE) || (Globals.bShowStatusBar == FALSE))
-    {
-        bStatusBarVisible = FALSE;
-        ShowWindow(Globals.hStatusBar, SW_HIDE);
-    }
-    else
-    {
-        bStatusBarVisible = TRUE;
-        ShowWindow(Globals.hStatusBar, SW_SHOW);
-        SendMessage(Globals.hStatusBar, WM_SIZE, 0, 0);
-    }
+    /* Update layout of controls */
+    SendMessageW(Globals.hMainWnd, WM_SIZE, 0, 0);
 
-    /* Set check state in show status bar item. */
-    if (bStatusBarVisible)
-    {
-        CheckMenuItem(Globals.hMenu, CMD_STATUSBAR, MF_BYCOMMAND | MF_CHECKED);
-    }
-    else
-    {
-        CheckMenuItem(Globals.hMenu, CMD_STATUSBAR, MF_BYCOMMAND | MF_UNCHECKED);
-    }
+    if (Globals.hStatusBar == NULL)
+        return;
 
-    /* Update menu mar with the previous changes */
-    DrawMenuBar(Globals.hMainWnd);
+    /* Update visibility of status bar */
+    ShowWindow(Globals.hStatusBar, (Globals.bShowStatusBar ? SW_SHOWNOACTIVATE : SW_HIDE));
 
-    /* Sefety test is edit control exists */
-    if (Globals.hEdit != NULL)
-    {
-        /* Retrieve the sizes of the controls */
-        GetClientRect(Globals.hMainWnd, &rc);
-        GetClientRect(Globals.hStatusBar, &rcstatus);
-
-        /* If status bar is currently visible, update dimensions of edit control */
-        if (bStatusBarVisible)
-            rc.bottom -= (rcstatus.bottom - rcstatus.top);
-
-        /* Resize edit control to right size. */
-        MoveWindow(Globals.hEdit,
-                   rc.left,
-                   rc.top,
-                   rc.right - rc.left,
-                   rc.bottom - rc.top,
-                   TRUE);
-    }
-
-    /* Set the status bar for multiple-text output */
-    DIALOG_StatusBarAlignParts();
-
-    /* Update content with current row/column text */
-    DIALOG_StatusBarUpdateCaretPos();
-    
-    /* Update line endings and encoding on the status bar */
-    DIALOG_StatusBarUpdateLineEndings();
-    DIALOG_StatusBarUpdateEncoding();
+    /* Update status bar contents */
+    DIALOG_StatusBarUpdateAll();
 }
 
 VOID DoCreateEditWindow(VOID)
@@ -1033,17 +953,7 @@ VOID DoCreateEditWindow(VOID)
     }
 
     /* Update wrap status into the main menu and recover style flags */
-    if (Globals.bWrapLongLines)
-    {
-        dwStyle = EDIT_STYLE_WRAP;
-        EnableMenuItem(Globals.hMenu, CMD_STATUSBAR, MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
-    } else {
-        dwStyle = EDIT_STYLE;
-        EnableMenuItem(Globals.hMenu, CMD_STATUSBAR, MF_BYCOMMAND | MF_ENABLED);
-    }
-
-    /* Update previous changes */
-    DrawMenuBar(Globals.hMainWnd);
+    dwStyle = (Globals.bWrapLongLines ? EDIT_STYLE_WRAP : EDIT_STYLE);
 
     /* Create the new edit control */
     Globals.hEdit = CreateWindowEx(WS_EX_CLIENTEDGE,
@@ -1058,7 +968,6 @@ VOID DoCreateEditWindow(VOID)
                                    NULL,
                                    Globals.hInstance,
                                    NULL);
-
     if (Globals.hEdit == NULL)
     {
         if (pTemp)
@@ -1088,28 +997,22 @@ VOID DoCreateEditWindow(VOID)
                                                  GWLP_WNDPROC,
                                                  (LONG_PTR)EDIT_WndProc);
 
-    /* Create/update status bar */
-    DoCreateStatusBar();
-
     /* Finally shows new edit control and set focus into it. */
     ShowWindow(Globals.hEdit, SW_SHOW);
     SetFocus(Globals.hEdit);
+
+    /* Re-arrange controls */
+    PostMessageW(Globals.hMainWnd, WM_SIZE, 0, 0);
 }
 
 VOID DIALOG_EditWrap(VOID)
 {
     Globals.bWrapLongLines = !Globals.bWrapLongLines;
 
-    if (Globals.bWrapLongLines)
-    {
-        EnableMenuItem(Globals.hMenu, CMD_GOTO, MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
-    }
-    else
-    {
-        EnableMenuItem(Globals.hMenu, CMD_GOTO, MF_BYCOMMAND | MF_ENABLED);
-    }
+    EnableMenuItem(Globals.hMenu, CMD_GOTO, (Globals.bWrapLongLines ? MF_GRAYED : MF_ENABLED));
 
     DoCreateEditWindow();
+    DoShowHideStatusBar();
 }
 
 VOID DIALOG_SelectFont(VOID)
@@ -1180,82 +1083,90 @@ VOID DIALOG_Replace(VOID)
     DIALOG_SearchDialog(ReplaceText);
 }
 
+typedef struct tagGOTO_DATA
+{
+    UINT iLine;
+    UINT cLines;
+} GOTO_DATA, *PGOTO_DATA;
+
 static INT_PTR
 CALLBACK
 DIALOG_GoTo_DialogProc(HWND hwndDialog, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    BOOL bResult = FALSE;
-    HWND hTextBox;
-    TCHAR szText[32];
+    static PGOTO_DATA s_pGotoData;
 
-    switch(uMsg) {
-    case WM_INITDIALOG:
-        hTextBox = GetDlgItem(hwndDialog, ID_LINENUMBER);
-        _sntprintf(szText, ARRAY_SIZE(szText), _T("%Id"), lParam);
-        SetWindowText(hTextBox, szText);
-        break;
-    case WM_COMMAND:
-        if (HIWORD(wParam) == BN_CLICKED)
+    switch (uMsg)
+    {
+        case WM_INITDIALOG:
+            s_pGotoData = (PGOTO_DATA)lParam;
+            SetDlgItemInt(hwndDialog, ID_LINENUMBER, s_pGotoData->iLine, FALSE);
+            return TRUE; /* Set focus */
+
+        case WM_COMMAND:
         {
             if (LOWORD(wParam) == IDOK)
             {
-                hTextBox = GetDlgItem(hwndDialog, ID_LINENUMBER);
-                GetWindowText(hTextBox, szText, ARRAY_SIZE(szText));
-                EndDialog(hwndDialog, _ttoi(szText));
-                bResult = TRUE;
+                UINT iLine = GetDlgItemInt(hwndDialog, ID_LINENUMBER, NULL, FALSE);
+                if (iLine <= 0 || s_pGotoData->cLines < iLine) /* Out of range */
+                {
+                    /* Show error message */
+                    WCHAR title[128], text[256];
+                    LoadStringW(Globals.hInstance, STRING_NOTEPAD, title, ARRAY_SIZE(title));
+                    LoadStringW(Globals.hInstance, STRING_LINE_NUMBER_OUT_OF_RANGE, text, ARRAY_SIZE(text));
+                    MessageBoxW(hwndDialog, text, title, MB_OK);
+
+                    SendDlgItemMessageW(hwndDialog, ID_LINENUMBER, EM_SETSEL, 0, -1);
+                    SetFocus(GetDlgItem(hwndDialog, ID_LINENUMBER));
+                    break;
+                }
+                s_pGotoData->iLine = iLine;
+                EndDialog(hwndDialog, IDOK);
             }
             else if (LOWORD(wParam) == IDCANCEL)
             {
-                EndDialog(hwndDialog, 0);
-                bResult = TRUE;
+                EndDialog(hwndDialog, IDCANCEL);
             }
+            break;
         }
-        break;
     }
 
-    return bResult;
+    return 0;
 }
 
 VOID DIALOG_GoTo(VOID)
 {
-    INT_PTR nLine;
-    LPTSTR pszText;
-    int nLength, i;
-    DWORD dwStart, dwEnd;
+    GOTO_DATA GotoData;
+    DWORD dwStart = 0, dwEnd = 0;
+    INT ich, cch = GetWindowTextLength(Globals.hEdit);
 
-    nLength = GetWindowTextLength(Globals.hEdit);
-    pszText = (LPTSTR) HeapAlloc(GetProcessHeap(), 0, (nLength + 1) * sizeof(*pszText));
-    if (!pszText)
-        return;
-
-    /* Retrieve current text */
-    GetWindowText(Globals.hEdit, pszText, nLength + 1);
+    /* Get the current line number and the total line number */
     SendMessage(Globals.hEdit, EM_GETSEL, (WPARAM) &dwStart, (LPARAM) &dwEnd);
+    GotoData.iLine = (UINT)SendMessage(Globals.hEdit, EM_LINEFROMCHAR, dwStart, 0) + 1;
+    GotoData.cLines = (UINT)SendMessage(Globals.hEdit, EM_GETLINECOUNT, 0, 0);
 
-    nLine = 1;
-    for (i = 0; (i < (int) dwStart) && pszText[i]; i++)
+    /* Ask the user for line number */
+    if (DialogBoxParam(Globals.hInstance,
+                       MAKEINTRESOURCE(DIALOG_GOTO),
+                       Globals.hMainWnd,
+                       DIALOG_GoTo_DialogProc,
+                       (LPARAM)&GotoData) != IDOK)
     {
-        if (pszText[i] == '\n')
-            nLine++;
+        return; /* Canceled */
     }
 
-    nLine = DialogBoxParam(Globals.hInstance,
-                           MAKEINTRESOURCE(DIALOG_GOTO),
-                           Globals.hMainWnd,
-                           DIALOG_GoTo_DialogProc,
-                           nLine);
+    --GotoData.iLine; /* Make it zero-based */
 
-    if (nLine >= 1)
-    {
-        for (i = 0; pszText[i] && (nLine > 1) && (i < nLength - 1); i++)
-        {
-            if (pszText[i] == '\n')
-                nLine--;
-        }
-        SendMessage(Globals.hEdit, EM_SETSEL, i, i);
-        SendMessage(Globals.hEdit, EM_SCROLLCARET, 0, 0);
-    }
-    HeapFree(GetProcessHeap(), 0, pszText);
+    /* Get ich (the target character index) from line number */
+    if (GotoData.iLine <= 0)
+        ich = 0;
+    else if (GotoData.iLine >= GotoData.cLines)
+        ich = cch;
+    else
+        ich = (INT)SendMessage(Globals.hEdit, EM_LINEINDEX, GotoData.iLine, 0);
+
+    /* Move the caret */
+    SendMessage(Globals.hEdit, EM_SETSEL, ich, ich);
+    SendMessage(Globals.hEdit, EM_SCROLLCARET, 0, 0);
 }
 
 VOID DIALOG_StatusBarUpdateCaretPos(VOID)
@@ -1275,8 +1186,7 @@ VOID DIALOG_StatusBarUpdateCaretPos(VOID)
 VOID DIALOG_ViewStatusBar(VOID)
 {
     Globals.bShowStatusBar = !Globals.bShowStatusBar;
-
-    DoCreateStatusBar();
+    DoShowHideStatusBar();
 }
 
 VOID DIALOG_HelpContents(VOID)

@@ -4,9 +4,11 @@
  * PURPOSE:          Windows
  * FILE:             win32ss/user/ntuser/winpos.c
  * PROGRAMER:        Casper S. Hornstrup (chorns@users.sourceforge.net)
+ *                   Katayama Hirofumi MZ (katayama.hirofumi.mz@gmail.com)
  */
 
 #include <win32k.h>
+#include <ddk/immdev.h>
 DBG_DEFAULT_CHANNEL(UserWinpos);
 
 /* GLOBALS *******************************************************************/
@@ -1743,6 +1745,43 @@ ForceNCPaintErase(PWND Wnd, HRGN hRgn, PREGION pRgn)
    }
 }
 
+static VOID FASTCALL IntImeWindowPosChanged(VOID)
+{
+    HWND *phwnd;
+    PWND pwndNode, pwndDesktop = UserGetDesktopWindow();
+    PWINDOWLIST pWL;
+    USER_REFERENCE_ENTRY Ref;
+
+    if (!pwndDesktop)
+        return;
+
+    /* Enumerate the windows to get the IME windows (of default and non-default) */
+    pWL = IntBuildHwndList(pwndDesktop->spwndChild, IACE_LIST, gptiCurrent);
+    if (!pWL)
+        return;
+
+    for (phwnd = pWL->ahwnd; *phwnd != HWND_TERMINATOR; ++phwnd)
+    {
+        if (gptiCurrent->TIF_flags & TIF_INCLEANUP)
+            break;
+
+        pwndNode = ValidateHwndNoErr(*phwnd);
+        if (pwndNode == NULL ||
+            pwndNode->head.pti != gptiCurrent ||
+            pwndNode->pcls->atomClassName != gpsi->atomSysClass[ICLS_IME])
+        {
+            continue;
+        }
+
+        /* Now hwndNode is an IME window of the current thread */
+        UserRefObjectCo(pwndNode, &Ref);
+        co_IntSendMessage(*phwnd, WM_IME_SYSTEM, IMS_UPDATEIMEUI, 0);
+        UserDerefObjectCo(pwndNode);
+    }
+
+    IntFreeHwndList(pWL);
+}
+
 /* x and y are always screen relative */
 BOOLEAN FASTCALL
 co_WinPosSetWindowPos(
@@ -1979,7 +2018,7 @@ co_WinPosSetWindowPos(
       Window->state |= WNDS_SENDNCPAINT;
    }
 
-   if (!(WinPos.flags & SWP_NOREDRAW))
+   if (!(WinPos.flags & SWP_NOREDRAW) && ((WinPos.flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOPOSCHANGE))
    {
       /* Determine the new visible region */
       VisAfter = VIS_ComputeVisibleRegion(Window, FALSE, FALSE,
@@ -2100,8 +2139,7 @@ co_WinPosSetWindowPos(
       }
 
       /* We need to redraw what wasn't visible before or force a redraw */
-      if ((WinPos.flags & (SWP_FRAMECHANGED | SWP_SHOWWINDOW)) ||
-          (((WinPos.flags & SWP_AGG_NOGEOMETRYCHANGE) != SWP_AGG_NOGEOMETRYCHANGE) && VisAfter != NULL))
+      if (VisAfter != NULL)
       {
          PREGION DirtyRgn = IntSysCreateRectpRgn(0, 0, 0, 0);
          if (DirtyRgn)
@@ -2302,6 +2340,13 @@ co_WinPosSetWindowPos(
       PWND pWnd = ValidateHwndNoErr(WinPos.hwnd);
       if (pWnd)
          IntNotifyWinEvent(EVENT_OBJECT_LOCATIONCHANGE, pWnd, OBJID_WINDOW, CHILDID_SELF, WEF_SETBYWNDPTI);
+   }
+
+   /* Send WM_IME_SYSTEM:IMS_UPDATEIMEUI to the IME windows if necessary */
+   if ((WinPos.flags & (SWP_NOMOVE | SWP_NOSIZE)) != (SWP_NOMOVE | SWP_NOSIZE))
+   {
+      if (IS_IMM_MODE())
+          IntImeWindowPosChanged();
    }
 
    if(bPointerInWindow != IntPtInWindow(Window, gpsi->ptCursor.x, gpsi->ptCursor.y))
@@ -2918,6 +2963,7 @@ co_WinPosWindowFromPoint(
    return Window;
 }
 
+/* Win: _RealChildWindowFromPoint */
 PWND FASTCALL
 IntRealChildWindowFromPoint(PWND Parent, LONG x, LONG y)
 {
@@ -2960,6 +3006,7 @@ IntRealChildWindowFromPoint(PWND Parent, LONG x, LONG y)
    return pwndHit ? pwndHit : Parent;
 }
 
+/* Win: _ChildWindowFromPointEx */
 PWND APIENTRY
 IntChildWindowFromPointEx(PWND Parent, LONG x, LONG y, UINT uiFlags)
 {
@@ -3011,6 +3058,7 @@ IntChildWindowFromPointEx(PWND Parent, LONG x, LONG y, UINT uiFlags)
    return pwndHit ? pwndHit : Parent;
 }
 
+/* Win: _DeferWindowPos(PSMWP, PWND, PWND, ...) */
 HDWP
 FASTCALL
 IntDeferWindowPos( HDWP hdwp,
@@ -3101,7 +3149,8 @@ END:
     return retvalue;
 }
 
-BOOL FASTCALL IntEndDeferWindowPosEx( HDWP hdwp, BOOL sAsync )
+/* Win: xxxEndDeferWindowPosEx */
+BOOL FASTCALL IntEndDeferWindowPosEx(HDWP hdwp, BOOL bAsync)
 {
     PSMWP pDWP;
     PCVR winpos;
@@ -3131,7 +3180,7 @@ BOOL FASTCALL IntEndDeferWindowPosEx( HDWP hdwp, BOOL sAsync )
 
         UserRefObjectCo(pwnd, &Ref);
 
-        if ( sAsync )
+        if (bAsync)
         {
            LRESULT lRes;
            PWINDOWPOS ppos = ExAllocatePoolWithTag(PagedPool, sizeof(WINDOWPOS), USERTAG_SWP);
@@ -3162,6 +3211,7 @@ BOOL FASTCALL IntEndDeferWindowPosEx( HDWP hdwp, BOOL sAsync )
 
         UserDerefObjectCo(pwnd);
     }
+
     ExFreePoolWithTag(pDWP->acvr, USERTAG_SWP);
     UserDereferenceObject(pDWP);
     UserDeleteObject(hdwp, TYPE_SETWINDOWPOS);
