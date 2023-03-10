@@ -174,10 +174,7 @@ KdpPrintToLogFile(PCHAR String,
     OldIrql = KdbpAcquireLock(&KdpDebugLogSpinLock);
 
     beg = KdpCurrentPosition;
-    num = KdpFreeBytes;
-    if (Length < num)
-        num = Length;
-
+    num = min(Length, KdpFreeBytes);
     if (num != 0)
     {
         end = (beg + num) % KdpBufferSize;
@@ -215,8 +212,9 @@ KdpPrintToLogFile(PCHAR String,
 
 VOID
 NTAPI
-KdpDebugLogInit(PKD_DISPATCH_TABLE DispatchTable,
-                ULONG BootPhase)
+KdpDebugLogInit(
+    _In_ PKD_DISPATCH_TABLE DispatchTable,
+    _In_ ULONG BootPhase)
 {
     NTSTATUS Status;
     UNICODE_STRING FileName;
@@ -274,8 +272,9 @@ KdpDebugLogInit(PKD_DISPATCH_TABLE DispatchTable,
                               NULL,
                               FILE_ATTRIBUTE_NORMAL,
                               FILE_SHARE_READ,
-                              FILE_SUPERSEDE,
-                              FILE_WRITE_THROUGH | FILE_SYNCHRONOUS_IO_NONALERT,
+                              FILE_OPEN_IF,
+                              FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT |
+                                FILE_SEQUENTIAL_ONLY | FILE_WRITE_THROUGH,
                               NULL,
                               0);
 
@@ -286,6 +285,39 @@ KdpDebugLogInit(PKD_DISPATCH_TABLE DispatchTable,
             DPRINT1("Failed to open log file: 0x%08x\n", Status);
             return;
         }
+
+        /**    HACK for FILE_APPEND_DATA     **
+         ** Remove once CORE-18789 is fixed. **
+         ** Enforce to go to the end of file **/
+        {
+            FILE_STANDARD_INFORMATION FileInfo;
+            FILE_POSITION_INFORMATION FilePosInfo;
+
+            Status = ZwQueryInformationFile(KdpLogFileHandle,
+                                            &Iosb,
+                                            &FileInfo,
+                                            sizeof(FileInfo),
+                                            FileStandardInformation);
+            DPRINT("Status: 0x%08lx - EOF offset: %I64d\n",
+                    Status, FileInfo.EndOfFile.QuadPart);
+
+            Status = ZwQueryInformationFile(KdpLogFileHandle,
+                                            &Iosb,
+                                            &FilePosInfo,
+                                            sizeof(FilePosInfo),
+                                            FilePositionInformation);
+            DPRINT("Status: 0x%08lx - Position: %I64d\n",
+                    Status, FilePosInfo.CurrentByteOffset.QuadPart);
+
+            FilePosInfo.CurrentByteOffset.QuadPart = FileInfo.EndOfFile.QuadPart;
+            Status = ZwSetInformationFile(KdpLogFileHandle,
+                                          &Iosb,
+                                          &FilePosInfo,
+                                          sizeof(FilePosInfo),
+                                          FilePositionInformation);
+            DPRINT("ZwSetInformationFile(FilePositionInfo) returned: 0x%08lx\n", Status);
+        }
+        /** END OF HACK **/
 
         KeInitializeEvent(&KdpLoggerThreadEvent, SynchronizationEvent, TRUE);
 
@@ -343,8 +375,9 @@ KdpSerialPrint(PCHAR String,
 
 VOID
 NTAPI
-KdpSerialInit(PKD_DISPATCH_TABLE DispatchTable,
-              ULONG BootPhase)
+KdpSerialInit(
+    _In_ PKD_DISPATCH_TABLE DispatchTable,
+    _In_ ULONG BootPhase)
 {
     if (!KdpDebugMode.Serial) return;
 
@@ -470,16 +503,14 @@ KdpScreenPrint(PCHAR String,
        return;
 
     if (KdpDmesgBuffer == NULL)
-      return;
+        return;
 
     /* Acquire the printing spinlock without waiting at raised IRQL */
     OldIrql = KdbpAcquireLock(&KdpDmesgLogSpinLock);
 
-    /* Invariant: always_true(KdpDmesgFreeBytes == KdpDmesgBufferSize);
-     * set num to min(KdpDmesgFreeBytes, Length).
-     */
-    num = (Length < KdpDmesgFreeBytes) ? Length : KdpDmesgFreeBytes;
     beg = KdpDmesgCurrentPosition;
+    /* Invariant: always_true(KdpDmesgFreeBytes == KdpDmesgBufferSize); */
+    num = min(Length, KdpDmesgFreeBytes);
     if (num != 0)
     {
         end = (beg + num) % KdpDmesgBufferSize;
@@ -509,8 +540,9 @@ KdpScreenPrint(PCHAR String,
 
 VOID
 NTAPI
-KdpScreenInit(PKD_DISPATCH_TABLE DispatchTable,
-              ULONG BootPhase)
+KdpScreenInit(
+    _In_ PKD_DISPATCH_TABLE DispatchTable,
+    _In_ ULONG BootPhase)
 {
     if (!KdpDebugMode.Screen) return;
 
@@ -555,8 +587,8 @@ KdbInitialize(PKD_DISPATCH_TABLE DispatchTable, ULONG BootPhase);
 VOID
 NTAPI
 KdpKdbgInit(
-    PKD_DISPATCH_TABLE DispatchTable,
-    ULONG BootPhase)
+    _In_ PKD_DISPATCH_TABLE DispatchTable,
+    _In_ ULONG BootPhase)
 {
     /* Forward the call */
     KdbInitialize(DispatchTable, BootPhase);

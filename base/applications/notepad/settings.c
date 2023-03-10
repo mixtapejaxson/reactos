@@ -111,7 +111,6 @@ static BOOL QueryString(HKEY hKey, LPCTSTR pszValueName, LPTSTR pszResult, DWORD
 }
 
 /***********************************************************************
- *
  *           NOTEPAD_LoadSettingsFromRegistry
  *
  *  Load settings from registry HKCU\Software\Microsoft\Notepad.
@@ -211,7 +210,7 @@ void NOTEPAD_LoadSettingsFromRegistry(void)
     }
 
     hFont = CreateFontIndirect(&Globals.lfFont);
-    SendMessage(Globals.hEdit, WM_SETFONT, (WPARAM)hFont, (LPARAM)TRUE);
+    SendMessage(Globals.hEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
     if (hFont)
     {
         if (Globals.hFont)
@@ -231,7 +230,6 @@ static BOOL SaveString(HKEY hKey, LPCTSTR pszValueNameT, LPCTSTR pszValue)
 }
 
 /***********************************************************************
- *
  *           NOTEPAD_SaveSettingsToRegistry
  *
  *  Save settings to registry HKCU\Software\Microsoft\Notepad.

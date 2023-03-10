@@ -39,7 +39,7 @@ VOID DIALOG_EditTimeDate(VOID);
 VOID DIALOG_EditWrap(VOID);
 
 VOID DIALOG_Search(VOID);
-VOID DIALOG_SearchNext(VOID);
+VOID DIALOG_SearchNext(BOOL bDown);
 VOID DIALOG_Replace(VOID);
 VOID DIALOG_GoTo(VOID);
 
@@ -69,3 +69,4 @@ BOOL DoCloseFile(VOID);
 VOID DoOpenFile(LPCTSTR szFileName);
 VOID DoShowHideStatusBar(VOID);
 VOID DoCreateEditWindow(VOID);
+void UpdateWindowCaption(BOOL clearModifyAlert);
