@@ -7,9 +7,9 @@
  *              Katayama Hirofumi MZ
  */
 
-/* INCLUDES *********************************************************/
-
 #include "precomp.h"
+
+PaletteModel paletteModel;
 
 /* FUNCTIONS ********************************************************/
 
@@ -97,8 +97,8 @@ void PaletteModel::NotifyColorChanged()
 {
     if (paletteWindow.IsWindow())
         paletteWindow.SendMessage(WM_PALETTEMODELCOLORCHANGED);
-    if (selectionWindow.IsWindow())
-        selectionWindow.SendMessage(WM_PALETTEMODELCOLORCHANGED);
+    if (canvasWindow.IsWindow())
+        canvasWindow.SendMessage(WM_PALETTEMODELCOLORCHANGED);
     if (textEditWindow.IsWindow())
         textEditWindow.SendMessage(WM_PALETTEMODELCOLORCHANGED);
 }
