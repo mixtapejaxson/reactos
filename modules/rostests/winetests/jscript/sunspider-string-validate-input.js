@@ -59,12 +59,29 @@ function doTest()
    }
 }
 
+// Returns a random integer in [0, maxExclusive) using cryptographically secure randomness
+function secureRandomInt(maxExclusive) {
+    if (typeof window !== "undefined" && window.crypto && window.crypto.getRandomValues) {
+        var arr = new Uint32Array(1);
+        window.crypto.getRandomValues(arr);
+        // Avoid modulo bias if maxExclusive does not divide 2^32 evenly
+        var range = Math.floor(4294967296 / maxExclusive) * maxExclusive;
+        while (arr[0] >= range) {
+            window.crypto.getRandomValues(arr);
+        }
+        return arr[0] % maxExclusive;
+    } else {
+        // Fallback to Math.random (not secure)
+        return Math.floor(maxExclusive * Math.random());
+    }
+}
+
 function makeName(n)
 {
    var tmp = "";
    for (var i=0;i<n;i++)
    {
-      var l = Math.floor(26*Math.random());
+      var l = secureRandomInt(26);
       tmp += letters[l];
    }
    return tmp;
@@ -75,7 +92,7 @@ function makeNumber(n)
    var tmp = "";
    for (var i=0;i<n;i++)
    {
-      var l = Math.floor(9*Math.random());
+      var l = secureRandomInt(9);
       tmp = tmp.concat(l);
    }
    return tmp;
