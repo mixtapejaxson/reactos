@@ -49,7 +49,7 @@ ok(m.propertyIsEnumerable("length") === false, "m.length is not enumerable");
 ok(RegExp.leftContext === " ", "RegExp.leftContext = " + RegExp.leftContext);
 ok(RegExp.rightContext === "baaa", "RegExp.rightContext = " + RegExp.rightContext);
 
-m = /^[^<]*(<(.|\s)+>)[^>]*$|^#(\w+)$/.exec(
+m = /^[^<]*(<[\s\S]+>)[^>]*$|^#(\w+)$/.exec(
     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
 ok(m === null, "m is not null");
 
