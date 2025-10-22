@@ -4,7 +4,6 @@
 #include "rosui.h"
 #include "crichedit.h"
 #include "asyncinet.h"
-#include "misc.h"
 #include "appview.h"
 #include <shlobj_undoc.h>
 #include <shlguid_undoc.h>
@@ -53,17 +52,23 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CFrameWinTraits>
     CUiWindow<CStatusBar> *m_StatusBar = NULL;
 
     CApplicationView *m_ApplicationView = NULL;
+    friend class CApplicationView;
 
     CAppDB *m_Db;
     CAtlList<CAppInfo *> m_Selected;
 
     BOOL bUpdating = FALSE;
+    BOOL m_bAppwizMode;
+    HTREEITEM hRootItemInstalled;
 
     CStringW szSearchPattern;
     AppsCategories SelectedEnumType;
 
   public:
-    CMainWindow(CAppDB *db);
+    static HWND m_hLastFocus;
+    static bool m_PendingInstalledViewRefresh;
+
+    explicit CMainWindow(CAppDB *db, BOOL bAppwiz = FALSE);
 
     ~CMainWindow();
 
@@ -89,6 +94,9 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CFrameWinTraits>
     VOID
     OnSize(HWND hwnd, WPARAM wParam, LPARAM lParam);
 
+    VOID
+    CheckAvailable();
+
     BOOL
     RemoveSelectedAppFromRegistry();
     BOOL
@@ -104,7 +112,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CFrameWinTraits>
     UpdateStatusBarText();
 
     VOID
-    UpdateApplicationsList(AppsCategories EnumType, BOOL bReload = FALSE);
+    UpdateApplicationsList(AppsCategories EnumType, BOOL bReload = FALSE, BOOL bCheckAvailable = FALSE);
     VOID
     AddApplicationsToView(CAtlList<CAppInfo *> &List);
 
@@ -132,3 +140,7 @@ class CMainWindow : public CWindowImpl<CMainWindow, CWindow, CFrameWinTraits>
     void
     HandleTabOrder(int direction);
 };
+
+// Main window
+VOID
+MainWindowLoop(CMainWindow *wnd, INT nShowCmd);

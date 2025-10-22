@@ -202,7 +202,7 @@ BOOL NOTEPAD_FindNext(FINDREPLACE *pFindReplace, BOOL bReplace, BOOL bShowAlert)
         if (bShowAlert)
         {
             LoadString(Globals.hInstance, STRING_CANNOTFIND, szResource, _countof(szResource));
-            _sntprintf(szText, _countof(szText), szResource, pFindReplace->lpstrFindWhat);
+            StringCchPrintf(szText, _countof(szText), szResource, pFindReplace->lpstrFindWhat);
             LoadString(Globals.hInstance, STRING_NOTEPAD, szResource, _countof(szResource));
             MessageBox(Globals.hFindReplaceDlg, szText, szResource, MB_OK);
         }
@@ -270,6 +270,7 @@ static VOID NOTEPAD_InitData(HINSTANCE hInstance)
  */
 static VOID NOTEPAD_InitMenuPopup(HMENU menu, LPARAM index)
 {
+    DWORD dwStart, dwEnd;
     int enable;
 
     UNREFERENCED_PARAMETER(index);
@@ -280,8 +281,8 @@ static VOID NOTEPAD_InitMenuPopup(HMENU menu, LPARAM index)
         SendMessage(Globals.hEdit, EM_CANUNDO, 0, 0) ? MF_ENABLED : MF_GRAYED);
     EnableMenuItem(menu, CMD_PASTE,
         IsClipboardFormatAvailable(CF_TEXT) ? MF_ENABLED : MF_GRAYED);
-    enable = (int) SendMessage(Globals.hEdit, EM_GETSEL, 0, 0);
-    enable = (HIWORD(enable) == LOWORD(enable)) ? MF_GRAYED : MF_ENABLED;
+    SendMessage(Globals.hEdit, EM_GETSEL, (WPARAM)&dwStart, (LPARAM)&dwEnd);
+    enable = ((dwStart == dwEnd) ? MF_GRAYED : MF_ENABLED);
     EnableMenuItem(menu, CMD_CUT, enable);
     EnableMenuItem(menu, CMD_COPY, enable);
     EnableMenuItem(menu, CMD_DELETE, enable);
@@ -432,6 +433,8 @@ NOTEPAD_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             FINDREPLACE *pFindReplace = (FINDREPLACE *) lParam;
             Globals.find = *(FINDREPLACE *) lParam;
 
+            WaitCursor(TRUE);
+
             if (pFindReplace->Flags & FR_FINDNEXT)
                 NOTEPAD_FindNext(pFindReplace, FALSE, TRUE);
             else if (pFindReplace->Flags & FR_REPLACE)
@@ -440,6 +443,8 @@ NOTEPAD_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 NOTEPAD_ReplaceAll(pFindReplace);
             else if (pFindReplace->Flags & FR_DIALOGTERM)
                 NOTEPAD_FindTerm();
+
+            WaitCursor(FALSE);
             break;
         }
 
@@ -552,17 +557,9 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE prev, LPTSTR cmdline, int sh
     MSG msg;
     HACCEL hAccel;
     WNDCLASSEX wndclass;
-    HMONITOR monitor;
-    MONITORINFO info;
-    INT x, y;
-    RECT rcIntersect;
+    WINDOWPLACEMENT wp;
     static const TCHAR className[] = _T("Notepad");
     static const TCHAR winName[] = _T("Notepad");
-
-#ifdef _DEBUG
-    /* Report any memory leaks on exit */
-    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
-#endif
 
     switch (GetUserDefaultUILanguage())
     {
@@ -579,14 +576,14 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE prev, LPTSTR cmdline, int sh
     aFINDMSGSTRING = (ATOM)RegisterWindowMessage(FINDMSGSTRING);
 
     NOTEPAD_InitData(hInstance);
-    NOTEPAD_LoadSettingsFromRegistry();
+    NOTEPAD_LoadSettingsFromRegistry(&wp);
 
     ZeroMemory(&wndclass, sizeof(wndclass));
     wndclass.cbSize = sizeof(wndclass);
     wndclass.lpfnWndProc = NOTEPAD_WndProc;
     wndclass.hInstance = Globals.hInstance;
     wndclass.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_NPICON));
-    wndclass.hCursor = LoadCursor(0, IDC_ARROW);
+    wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);
     wndclass.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wndclass.lpszMenuName = MAKEINTRESOURCE(MAIN_MENU);
     wndclass.lpszClassName = className;
@@ -602,25 +599,14 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE prev, LPTSTR cmdline, int sh
         return 1;
     }
 
-    /* Setup windows */
-
-    monitor = MonitorFromRect(&Globals.main_rect, MONITOR_DEFAULTTOPRIMARY);
-    info.cbSize = sizeof(info);
-    GetMonitorInfoW(monitor, &info);
-
-    x = Globals.main_rect.left;
-    y = Globals.main_rect.top;
-    if (!IntersectRect(&rcIntersect, &Globals.main_rect, &info.rcWork))
-        x = y = CW_USEDEFAULT;
-
     /* Globals.hMainWnd will be set in WM_CREATE handling */
     CreateWindow(className,
                  winName,
                  WS_OVERLAPPEDWINDOW,
-                 x,
-                 y,
-                 Globals.main_rect.right - Globals.main_rect.left,
-                 Globals.main_rect.bottom - Globals.main_rect.top,
+                 CW_USEDEFAULT,
+                 CW_USEDEFAULT,
+                 CW_USEDEFAULT,
+                 CW_USEDEFAULT,
                  NULL,
                  NULL,
                  Globals.hInstance,
@@ -631,7 +617,17 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE prev, LPTSTR cmdline, int sh
         return 1;
     }
 
-    ShowWindow(Globals.hMainWnd, show);
+    /* Use the result of CW_USEDEFAULT if the data in the registry is not valid */
+    if (wp.rcNormalPosition.right == wp.rcNormalPosition.left)
+    {
+        GetWindowPlacement(Globals.hMainWnd, &wp);
+    }
+    /* Does the parent process want to force a show action? */
+    if (show != SW_SHOWDEFAULT)
+    {
+        wp.showCmd = show;
+    }
+    SetWindowPlacement(Globals.hMainWnd, &wp);
     UpdateWindow(Globals.hMainWnd);
 
     if (!HandleCommandLine(cmdline))
@@ -641,8 +637,8 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE prev, LPTSTR cmdline, int sh
 
     while (GetMessage(&msg, NULL, 0, 0))
     {
-        if (!TranslateAccelerator(Globals.hMainWnd, hAccel, &msg) &&
-            !IsDialogMessage(Globals.hFindReplaceDlg, &msg))
+        if ((!Globals.hFindReplaceDlg || !IsDialogMessage(Globals.hFindReplaceDlg, &msg)) &&
+            !TranslateAccelerator(Globals.hMainWnd, hAccel, &msg))
         {
             TranslateMessage(&msg);
             DispatchMessage(&msg);

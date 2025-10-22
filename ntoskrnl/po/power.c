@@ -4,7 +4,7 @@
  * FILE:            ntoskrnl/po/power.c
  * PURPOSE:         Power Manager
  * PROGRAMMERS:     Casper S. Hornstrup (chorns@users.sourceforge.net)
- *                  Herv� Poussineau (hpoussin@reactos.com)
+ *                  Hervé Poussineau (hpoussin@reactos.com)
  */
 
 /* INCLUDES ******************************************************************/
@@ -410,7 +410,7 @@ PoInitSystem(IN ULONG BootPhase)
                                                 (PVOID)&GUID_DEVICE_SYS_BUTTON,
                                                 IopRootDeviceNode->PhysicalDeviceObject->DriverObject,
                                                 PopAddRemoveSysCapsCallback,
-                                                NULL,
+                                                (PVOID)(ULONG_PTR)PolicyDeviceSystemButton,
                                                 &NotificationEntry);
         if (!NT_SUCCESS(Status))
             return FALSE;
@@ -421,8 +421,20 @@ PoInitSystem(IN ULONG BootPhase)
                                                 (PVOID)&GUID_DEVICE_LID,
                                                 IopRootDeviceNode->PhysicalDeviceObject->DriverObject,
                                                 PopAddRemoveSysCapsCallback,
-                                                NULL,
+                                                (PVOID)(ULONG_PTR)PolicyDeviceSystemButton,
                                                 &NotificationEntry);
+        if (!NT_SUCCESS(Status))
+            return FALSE;
+
+        /* Register battery notification */
+        Status = IoRegisterPlugPlayNotification(EventCategoryDeviceInterfaceChange,
+                                                PNPNOTIFY_DEVICE_INTERFACE_INCLUDE_EXISTING_INTERFACES,
+                                                (PVOID)&GUID_DEVICE_BATTERY,
+                                                IopRootDeviceNode->PhysicalDeviceObject->DriverObject,
+                                                PopAddRemoveSysCapsCallback,
+                                                (PVOID)(ULONG_PTR)PolicyDeviceBattery,
+                                                &NotificationEntry);
+
         return NT_SUCCESS(Status);
     }
 
@@ -772,6 +784,115 @@ NtInitiatePowerAction(IN POWER_ACTION SystemAction,
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static
+NTSTATUS
+PopQueryBatteryState(
+    _Out_ PSYSTEM_BATTERY_STATE BatteryState)
+{
+    static const UNICODE_STRING CompBattDeviceName =
+        RTL_CONSTANT_STRING(L"\\Device\\CompositeBattery");
+    OBJECT_ATTRIBUTES ObjectAttributes = RTL_CONSTANT_OBJECT_ATTRIBUTES(
+        &CompBattDeviceName, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE);
+    HANDLE CompBattHandle;
+    IO_STATUS_BLOCK IoStatusBlock;
+    BATTERY_QUERY_INFORMATION BatteryQueryInfo = {0};
+    BATTERY_INFORMATION BatteryInfo = { 0 };
+    BATTERY_STATUS BatteryStatus;
+    NTSTATUS Status;
+
+    /* Open the CompositeBattery device */
+    Status = ZwOpenFile(&CompBattHandle,
+                        GENERIC_READ | SYNCHRONIZE,
+                        &ObjectAttributes,
+                        &IoStatusBlock,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        FILE_SYNCHRONOUS_IO_NONALERT);
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("Failed to open CompositeBattery device: Status: 0x%08lX\n", Status);
+        return Status;
+    }
+
+    /* Query the battery tag */
+    ULONG Wait = 0;
+    Status = ZwDeviceIoControlFile(CompBattHandle,
+                                   NULL,
+                                   NULL,
+                                   NULL,
+                                   &IoStatusBlock,
+                                   IOCTL_BATTERY_QUERY_TAG,
+                                   &Wait,
+                                   sizeof(Wait),
+                                   &BatteryQueryInfo.BatteryTag,
+                                   sizeof(BatteryQueryInfo.BatteryTag));
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("Failed to query battery tag: Status: 0x%08lX\n", Status);
+        goto Exit;
+    }
+
+    /* Query the battery information */
+    BatteryQueryInfo.InformationLevel = BatteryInformation;
+    Status = ZwDeviceIoControlFile(CompBattHandle,
+                                   NULL,
+                                   NULL,
+                                   NULL,
+                                   &IoStatusBlock,
+                                   IOCTL_BATTERY_QUERY_INFORMATION,
+                                   &BatteryQueryInfo,
+                                   sizeof(BatteryQueryInfo),
+                                   &BatteryInfo,
+                                   sizeof(BatteryInfo));
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("Failed to query battery information: Status: 0x%08lX\n", Status);
+    }
+
+    /* Query the battery status */
+    BATTERY_WAIT_STATUS BatteryWait = {0};
+    BatteryWait.BatteryTag = BatteryQueryInfo.BatteryTag;
+    BatteryWait.PowerState = 0xF ; // Wait for all power states
+    BatteryWait.HighCapacity = MAXULONG;
+    Status = ZwDeviceIoControlFile(CompBattHandle,
+                                   NULL,
+                                   NULL,
+                                   NULL,
+                                   &IoStatusBlock,
+                                   IOCTL_BATTERY_QUERY_STATUS,
+                                   &BatteryWait,
+                                   sizeof(BatteryWait),
+                                   &BatteryStatus,
+                                   sizeof(BatteryStatus));
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("Failed to query battery status: Status: 0x%08lX\n", Status);
+        goto Exit;
+    }
+
+    RtlZeroMemory(BatteryState, sizeof(*BatteryState));
+    BatteryState->BatteryPresent = TRUE;
+    BatteryState->AcOnLine = BooleanFlagOn(BatteryStatus.PowerState, BATTERY_POWER_ON_LINE);
+    BatteryState->Charging = BooleanFlagOn(BatteryStatus.PowerState, BATTERY_CHARGING);
+    BatteryState->Discharging = BooleanFlagOn(BatteryStatus.PowerState, BATTERY_DISCHARGING);
+    BatteryState->MaxCapacity = BatteryInfo.FullChargedCapacity;
+    BatteryState->RemainingCapacity = BatteryStatus.Capacity;
+    BatteryState->Rate = BatteryStatus.Rate;
+    if (BatteryState->Discharging && BatteryStatus.Rate < 0)
+    {
+        BatteryState->EstimatedTime =
+            3600 * BatteryInfo.FullChargedCapacity / -BatteryStatus.Rate;
+    }
+    else
+    {
+        BatteryState->EstimatedTime = 0;
+    }
+
+Exit:
+    ZwClose(CompBattHandle);
+    return Status;
+}
+    
+
 /*
  * @unimplemented
  */
@@ -812,20 +933,34 @@ NtPowerInformation(IN POWER_INFORMATION_LEVEL PowerInformationLevel,
     {
         case SystemBatteryState:
         {
-            PSYSTEM_BATTERY_STATE BatteryState = (PSYSTEM_BATTERY_STATE)OutputBuffer;
+            SYSTEM_BATTERY_STATE BatteryState;
 
             if (InputBuffer != NULL)
                 return STATUS_INVALID_PARAMETER;
             if (OutputBufferLength < sizeof(SYSTEM_BATTERY_STATE))
                 return STATUS_BUFFER_TOO_SMALL;
 
+            if (PopCapabilities.SystemBatteriesPresent)
+            {
+                /* Open the battery driver and query the battery state */
+                Status = PopQueryBatteryState(&BatteryState);
+                if (!NT_SUCCESS(Status))
+                {
+                    DPRINT1("Failed to query battery state: Status: 0x%08X\n", Status);
+                    return Status;
+                }
+            }
+            else
+            {
+                /* No batteries present, set defaults */
+                RtlZeroMemory(&BatteryState, sizeof(BatteryState));
+                BatteryState.AcOnLine = TRUE;
+            }
+
             _SEH2_TRY
             {
-                /* Just zero the struct (and thus set BatteryState->BatteryPresent = FALSE) */
-                RtlZeroMemory(BatteryState, sizeof(SYSTEM_BATTERY_STATE));
-                BatteryState->EstimatedTime = MAXULONG;
-//                BatteryState->AcOnLine = TRUE;
-
+                /* Copy the battery state to the output buffer */
+                RtlCopyMemory(OutputBuffer, &BatteryState, sizeof(BatteryState));
                 Status = STATUS_SUCCESS;
             }
             _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)

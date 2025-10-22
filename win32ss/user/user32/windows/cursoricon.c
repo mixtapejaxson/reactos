@@ -1,16 +1,265 @@
 /*
- * PROJECT:         ReactOS user32.dll
- * COPYRIGHT:       GPL - See COPYING in the top level directory
- * FILE:            win32ss/user/user32/windows/cursoricon.c
- * PURPOSE:         cursor and icons implementation
- * PROGRAMMER:      Jérôme Gardou (jerome.gardou@reactos.org)
+ * PROJECT:     ReactOS user32.dll
+ * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
+ * PURPOSE:     cursor and icons implementation
+ * COPYRIGHT:   Copyright Jérôme Gardou <jerome.gardou@reactos.org>
+ *              Copyright 2022-2025 Doug Lyons <douglyons@douglyons.com>
+ *              Copyright 2025 Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
  */
 
 #include <user32.h>
+#include "png.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cursor);
 WINE_DECLARE_DEBUG_CHANNEL(icon);
 //WINE_DECLARE_DEBUG_CHANNEL(resource);
+
+#include <pshpack1.h>
+typedef struct _CURSORICONFILEDIRENTRY
+{
+    BYTE bWidth;
+    BYTE bHeight;
+    BYTE bColorCount;
+    BYTE bReserved;
+    union
+    {
+        WORD wPlanes; /* For icons */
+        WORD xHotspot; /* For cursors */
+    };
+    union
+    {
+        WORD wBitCount; /* For icons */
+        WORD yHotspot; /* For cursors */
+    };
+    DWORD dwDIBSize;
+    DWORD dwDIBOffset;
+} CURSORICONFILEDIRENTRY;
+
+typedef struct _CURSORICONFILEDIR
+{
+    WORD idReserved;
+    WORD idType;
+    WORD idCount;
+    CURSORICONFILEDIRENTRY idEntries[1];
+} CURSORICONFILEDIR;
+#include <poppack.h>
+
+#define PNG_CHECK_SIG_SIZE 8 /* Check signature size */
+
+/* libpng helpers */
+typedef struct _PNG_READER_STATE
+{
+    png_bytep buffer;
+    size_t bufSize;
+    size_t currentPos;
+} PNG_READER_STATE;
+
+/* This function is used for reading png data from memory */
+static VOID
+ReadMemoryPng(
+    _Inout_ png_structp png_ptr,
+    _Out_ png_bytep data,
+    _In_ size_t length)
+{
+    PNG_READER_STATE *state = png_get_io_ptr(png_ptr);
+    if ((state->currentPos + length) > state->bufSize)
+    {
+        ERR("png read error\n");
+        png_error(png_ptr, "read error in ReadMemoryPng");
+        return;
+    }
+    RtlCopyMemory(data, state->buffer + state->currentPos, length);
+    state->currentPos += length;
+}
+
+/* libpng.dll is delay-loaded. If no libpng.dll exists, we have to avoid exception */
+static BOOL
+LibPngExists(VOID)
+{
+    static BOOL bLibPngFound = -1;
+    if (bLibPngFound == -1)
+    {
+        HINSTANCE hLibPng = LoadLibraryExW(L"libpng.dll", NULL, LOAD_LIBRARY_AS_DATAFILE);
+        bLibPngFound  = !!hLibPng;
+        FreeLibrary(hLibPng);
+    }
+    return bLibPngFound;
+}
+
+static int get_dib_image_size(int width, int height, int depth);
+
+/* Convert PNG raw data to BMP icon data */
+static PBYTE
+CURSORICON_ConvertPngToBmpIcon(
+    _In_ PBYTE pngBits,
+    _In_ DWORD fileSize,
+    _Out_ PDWORD pBmpIconSize)
+{
+    TRACE("pngBits %p fileSize %d\n", pngBits, fileSize);
+
+    if (!LibPngExists())
+    {
+        ERR("No libpng.dll\n");
+        return NULL;
+    }
+
+    if (!pngBits || fileSize < PNG_CHECK_SIG_SIZE || !png_check_sig(pngBits, PNG_CHECK_SIG_SIZE))
+        return NULL;
+
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr)
+    {
+        ERR("png_create_read_struct error\n");
+        return NULL;
+    }
+
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr)
+    {
+        ERR("png_create_info_struct error\n");
+        png_destroy_read_struct(&png_ptr, NULL, NULL);
+        return NULL;
+    }
+
+    /* Set our own read_function */
+    PNG_READER_STATE readerState = { pngBits, fileSize, PNG_CHECK_SIG_SIZE };
+    png_set_read_fn(png_ptr, &readerState, ReadMemoryPng);
+    png_set_sig_bytes(png_ptr, PNG_CHECK_SIG_SIZE);
+
+    /* Read png info */
+    png_read_info(png_ptr, info_ptr);
+
+    /* Add translation of some PNG formats and update info */
+    int colorType = png_get_color_type(png_ptr, info_ptr);
+    if (colorType == PNG_COLOR_TYPE_PALETTE)
+        png_set_palette_to_rgb(png_ptr);
+    else if (colorType == PNG_COLOR_TYPE_GRAY || colorType == PNG_COLOR_TYPE_GRAY_ALPHA)
+        png_set_gray_to_rgb(png_ptr);
+    png_set_scale_16(png_ptr); /* Convert 16-bit channels to 8-bit */
+    png_read_update_info(png_ptr, info_ptr);
+
+    /* Get updated png info */
+    png_uint_32 width, height;
+    int bitDepth;
+    png_get_IHDR(png_ptr, info_ptr, &width, &height, &bitDepth, &colorType, NULL, NULL, NULL);
+    TRACE("width %d, height %d, bitDepth %d, colorType %d\n",
+          width, height, bitDepth, colorType);
+
+    int channels = png_get_channels(png_ptr, info_ptr);
+    int rowbytes = png_get_rowbytes(png_ptr, info_ptr);
+    int imageSize = height * rowbytes;
+    TRACE("rowbytes %d, channels %d, imageSize %d\n", rowbytes, channels, imageSize);
+
+    /* Allocate rows data */
+    png_bytepp rows = png_malloc(png_ptr, sizeof(png_bytep) * height);
+    if (!rows)
+    {
+        ERR("png_malloc failed\n");
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return NULL;
+    }
+
+    for (int i = 0; i < (int)height; i++)
+    {
+        rows[i] = png_malloc(png_ptr, rowbytes);
+        if (!rows[i])
+        {
+            ERR("png_malloc failed\n");
+
+            /* Clean up */
+            while (--i >= 0)
+                png_free(png_ptr, rows[i]);
+            png_free(png_ptr, rows);
+            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+
+            return NULL;
+        }
+    }
+
+    /* Read png image data */
+    png_set_rows(png_ptr, info_ptr, rows);
+    png_read_image(png_ptr, rows);
+    png_read_end(png_ptr, info_ptr);
+
+    /* After reading the image, you can deal with row pointers */
+    PBYTE imageBytes = HeapAlloc(GetProcessHeap(), 0, imageSize);
+    if (imageBytes)
+    {
+        PBYTE pb = imageBytes;
+        for (int i = height - 1; i >= 0; i--)
+        {
+            png_bytep row = rows[i];
+            for (int j = 0; j < channels * width; j += channels)
+            {
+                *pb++ = row[j + 2]; /* Red */
+                *pb++ = row[j + 1]; /* Green */
+                *pb++ = row[j + 0]; /* Blue */
+                if (channels == 4)
+                    *pb++ = row[j + 3]; /* Alpha */
+            }
+            pb += (channels * width) % 4;
+        }
+    }
+
+    /* Clean up */
+    for (int i = 0; i < (int)height; i++)
+        png_free(png_ptr, rows[i]);
+    png_free(png_ptr, rows);
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+
+    if (!imageBytes)
+    {
+        ERR("HeapAlloc failed\n");
+        return NULL;
+    }
+
+    /* BPP (Bits Per Pixel) */
+    WORD bpp = (WORD)(bitDepth * channels);
+
+    /* The byte size of mask bits */
+    DWORD maskSize = get_dib_image_size(width, height, 1);
+
+    /* Build BITMAPINFOHEADER */
+    BITMAPINFOHEADER info = { sizeof(info) };
+    info.biWidth = width;
+    info.biHeight = 2 * height;
+    info.biPlanes = 1;
+    info.biBitCount = bpp;
+    info.biCompression = BI_RGB;
+
+    /* Build CURSORICONFILEDIR */
+    CURSORICONFILEDIR cifd = { 0, 1, 1 };
+    cifd.idEntries[0].bWidth = (BYTE)width;
+    cifd.idEntries[0].bHeight = (BYTE)height;
+    cifd.idEntries[0].bColorCount = 0; /* No color palette */
+    cifd.idEntries[0].wPlanes = 1; /* Must be 1 */
+    cifd.idEntries[0].wBitCount = bpp;
+    cifd.idEntries[0].dwDIBSize = (DWORD)(sizeof(info) + imageSize + maskSize);
+    cifd.idEntries[0].dwDIBOffset = (DWORD)sizeof(cifd);
+
+    /* Allocate BMP icon data */
+    *pBmpIconSize = (DWORD)(sizeof(cifd) + sizeof(info) + imageSize + maskSize);
+    PBYTE pbBmpIcon = HeapAlloc(GetProcessHeap(), 0, *pBmpIconSize);
+    if (!pbBmpIcon)
+    {
+        ERR("HeapAlloc failed\n");
+        HeapFree(GetProcessHeap(), 0, imageBytes);
+        return NULL;
+    }
+
+    /* Store data to pbBmpIcon */
+    PBYTE pb = pbBmpIcon;
+    RtlCopyMemory(pb, &cifd, sizeof(cifd));
+    pb += sizeof(cifd);
+    RtlCopyMemory(pb, &info, sizeof(info));
+    pb += sizeof(info);
+    RtlCopyMemory(pb, imageBytes, imageSize);
+    pb += imageSize;
+    RtlFillMemory(pb, maskSize, 0xFF); /* Mask bits for AND operation */
+
+    HeapFree(GetProcessHeap(), 0, imageBytes);
+    return pbBmpIcon;
+}
 
 /* We only use Wide string functions */
 #undef MAKEINTRESOURCE
@@ -152,6 +401,8 @@ static BOOL is_dib_monochrome( const BITMAPINFO* info )
     }
 }
 
+/* Return the size of the bitmap info structure including color table and
+ * the bytes required for 3 DWORDS if this is a BI_BITFIELDS bmp. */
 static int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
 {
     unsigned int colors, size, masks = 0;
@@ -170,8 +421,21 @@ static int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
                 colors = 256;
         if (!colors && (info->bmiHeader.biBitCount <= 8))
             colors = 1 << info->bmiHeader.biBitCount;
+        /* Account for BI_BITFIELDS in BITMAPINFOHEADER(v1-v3) bmp's. The
+         * 'max' selection using biSize below will exclude v4 & v5's. */
         if (info->bmiHeader.biCompression == BI_BITFIELDS) masks = 3;
         size = max( info->bmiHeader.biSize, sizeof(BITMAPINFOHEADER) + masks * sizeof(DWORD) );
+        /* Test for BI_BITFIELDS format and either 16 or 32 bpp.
+         * If so, account for the 3 DWORD masks (RGB Order).
+         * BITMAPCOREHEADER tested above has no 16 or 32 bpp types.
+         * See table "All of the possible pixel formats in a DIB"
+         * at https://en.wikipedia.org/wiki/BMP_file_format. */
+        if (info->bmiHeader.biSize >= sizeof(BITMAPV4HEADER) &&
+            info->bmiHeader.biCompression == BI_BITFIELDS &&
+            (info->bmiHeader.biBitCount == 16 || info->bmiHeader.biBitCount == 32))
+        {
+            size += 3 * sizeof(DWORD);  // BI_BITFIELDS
+        }
         return size + colors * ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBQUAD) : sizeof(WORD));
     }
 }
@@ -179,6 +443,12 @@ static int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
 static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
                               LONG *height, WORD *bpp, DWORD *compr )
 {
+    #define CR 13
+    #define LF 10
+    #define EOFM 26 // DOS End Of File Marker
+    #define HighBitDetect 0x89 // Byte with high bit set to test if not 7-bit
+    /* wine's definition */
+    static const BYTE png_sig_pattern[] = { HighBitDetect, 'P', 'N', 'G', CR, LF, EOFM, LF };
     if (header->biSize == sizeof(BITMAPCOREHEADER))
     {
         const BITMAPCOREHEADER *core = (const BITMAPCOREHEADER *)header;
@@ -198,7 +468,15 @@ static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
         *compr  = header->biCompression;
         return 1;
     }
-    ERR("(%d): unknown/wrong size for header\n", header->biSize );
+    if (memcmp(&header->biSize, png_sig_pattern, sizeof(png_sig_pattern)) == 0)
+    {
+        TRACE("We have a PNG icon\n");
+        /* for PNG format details see https://en.wikipedia.org/wiki/PNG */
+    }
+    else
+    {
+        ERR("Unknown/wrong size for header of 0x%x\n", header->biSize );
+    }
     return -1;
 }
 
@@ -439,29 +717,6 @@ done:
     TRACE("Returning 0x%08x.\n", alpha);
     return alpha;
 }
-
-#include "pshpack1.h"
-
-typedef struct {
-    BYTE bWidth;
-    BYTE bHeight;
-    BYTE bColorCount;
-    BYTE bReserved;
-    WORD xHotspot;
-    WORD yHotspot;
-    DWORD dwDIBSize;
-    DWORD dwDIBOffset;
-} CURSORICONFILEDIRENTRY;
-
-typedef struct
-{
-    WORD                idReserved;
-    WORD                idType;
-    WORD                idCount;
-    CURSORICONFILEDIRENTRY  idEntries[1];
-} CURSORICONFILEDIR;
-
-#include "poppack.h"
 
 const CURSORICONFILEDIRENTRY*
 get_best_icon_file_entry(
@@ -1085,7 +1340,7 @@ BITMAP_LoadImageW(
     HBITMAP hbmpOld, hbmpRet = NULL;
     LONG width, height;
     WORD bpp;
-    DWORD compr;
+    DWORD compr, ResSize = 0;
 
     /* Map the bitmap info */
     if(fuLoad & LR_LOADFROMFILE)
@@ -1123,6 +1378,15 @@ BITMAP_LoadImageW(
         pbmi = LockResource(hgRsrc);
         if(!pbmi)
             return NULL;
+        ResSize = SizeofResource(hinst, hrsrc);
+    }
+
+    if (pbmi->bmiHeader.biCompression == BI_BITFIELDS && pbmi->bmiHeader.biBitCount == 32)
+    {
+        SIZE_T totalSize = pbmi->bmiHeader.biSize + (3 * sizeof(DWORD)) +
+                           pbmi->bmiHeader.biSizeImage;
+        if (pbmi->bmiHeader.biSizeImage != 0 && totalSize != ResSize)
+            WARN("Possibly bad resource size provided\n");
     }
 
     /* Fix up values */
@@ -1147,6 +1411,21 @@ BITMAP_LoadImageW(
     if(!pbmiCopy)
         goto end;
     CopyMemory(pbmiCopy, pbmi, iBMISize);
+
+    TRACE("Size Image %d, Size Header %d, ResSize %d\n",
+        pbmiCopy->bmiHeader.biSizeImage, pbmiCopy->bmiHeader.biSize, ResSize);
+
+    /* HACK: If this is a binutils' windres.exe compiled 16 or 32 bpp bitmap
+     * using BI_BITFIELDS, then a bug causes it to fail to include
+     * the bytes for the bitfields. So, we have to substract out the
+     * size of the bitfields previously included from bitmap_info_size. */
+    if (compr == BI_BITFIELDS && (bpp == 16 || bpp == 32) &&
+        pbmiCopy->bmiHeader.biSizeImage + pbmiCopy->bmiHeader.biSize == ResSize)
+    {
+        /* GCC pointer to the image data has 12 less bytes than MSVC */
+        pvBits = (char*)pvBits - 12;
+        WARN("Found GCC Resource Compiled 16-bpp or 32-bpp error\n");
+    }
 
     /* Fix it up, if needed */
     if(fuLoad & (LR_LOADTRANSPARENT | LR_LOADMAP3DCOLORS))
@@ -1340,10 +1619,10 @@ CURSORICON_LoadFromFileW(
 {
     const CURSORICONFILEDIRENTRY *entry;
     const CURSORICONFILEDIR *dir;
-    DWORD filesize = 0;
-    LPBYTE bits;
+    DWORD filesize = 0, BmpIconSize;
+    PBYTE bits, pbBmpIcon = NULL;
     HANDLE hCurIcon = NULL;
-    CURSORDATA cursorData;
+    CURSORDATA cursorData = { 0 };
 
     TRACE("loading %s\n", debugstr_w( lpszName ));
 
@@ -1367,17 +1646,39 @@ CURSORICON_LoadFromFileW(
     if(!cxDesired) cxDesired = entry->bWidth;
     if(!cyDesired) cyDesired = entry->bHeight;
     /* A bit of preparation */
-    ZeroMemory(&cursorData, sizeof(cursorData));
     if(!bIcon)
     {
         cursorData.xHotspot = entry->xHotspot;
         cursorData.yHotspot = entry->yHotspot;
     }
-    cursorData.rt = (USHORT)((ULONG_PTR)(bIcon ? RT_ICON : RT_CURSOR));
+    cursorData.rt = LOWORD(bIcon ? RT_ICON : RT_CURSOR);
 
-    /* Do the dance */
-    if(!CURSORICON_GetCursorDataFromBMI(&cursorData, (BITMAPINFO*)(&bits[entry->dwDIBOffset])))
-        goto end;
+    /* Try to load BMP icon */
+    if (!CURSORICON_GetCursorDataFromBMI(&cursorData, (PBITMAPINFO)(&bits[entry->dwDIBOffset])))
+    {
+        /* Convert PNG raw data to BMP icon if the icon was PNG icon */
+        PBYTE pngBits = &bits[entry->dwDIBOffset];
+        pbBmpIcon = CURSORICON_ConvertPngToBmpIcon(pngBits, filesize, &BmpIconSize);
+        if (!pbBmpIcon)
+            goto end; /* Not PNG icon or failed */
+
+        /* Find icon entry from BMP icon */
+        dir = (CURSORICONFILEDIR *)pbBmpIcon;
+        entry = &dir->idEntries[0]; /* Only one entry */
+
+        /* A bit of preparation */
+        ZeroMemory(&cursorData, sizeof(cursorData));
+        cursorData.rt = LOWORD(bIcon ? RT_ICON : RT_CURSOR);
+
+        /* Can we load this BMP icon? */
+        if (!CURSORICON_GetCursorDataFromBMI(&cursorData, (PBITMAPINFO)(&pbBmpIcon[entry->dwDIBOffset])))
+        {
+            ERR("Failing file: '%S'.\n", lpszName);
+            goto end;
+        }
+
+        TRACE("Processing PNG/Vista icon: '%S'\n", lpszName);
+    }
 
     hCurIcon = NtUserxCreateEmptyCurObject(FALSE);
     if(!hCurIcon)
@@ -1387,21 +1688,19 @@ CURSORICON_LoadFromFileW(
     if(!NtUserSetCursorIconData(hCurIcon, NULL, NULL, &cursorData))
     {
         NtUserDestroyCursor(hCurIcon, TRUE);
-        goto end_error;
+        hCurIcon = NULL;
     }
 
 end:
+    if (!hCurIcon)
+    {
+        if (cursorData.hbmMask) DeleteObject(cursorData.hbmMask);
+        if (cursorData.hbmColor) DeleteObject(cursorData.hbmColor);
+        if (cursorData.hbmAlpha) DeleteObject(cursorData.hbmAlpha);
+    }
+    HeapFree(GetProcessHeap(), 0, pbBmpIcon);
     UnmapViewOfFile(bits);
     return hCurIcon;
-
-    /* Clean up */
-end_error:
-    DeleteObject(cursorData.hbmMask);
-    if(cursorData.hbmColor) DeleteObject(cursorData.hbmColor);
-    if(cursorData.hbmAlpha) DeleteObject(cursorData.hbmAlpha);
-    UnmapViewOfFile(bits);
-
-    return NULL;
 }
 
 static
@@ -1439,7 +1738,22 @@ CURSORICON_LoadImageW(
 
     /* Check if caller wants OEM icons */
     if(!hinst)
+    {
+        #ifndef IDI_SHIELD
+        #define IDI_SHIELD MAKEINTRESOURCE(32518)
+        #endif
+
         hinst = User32Instance;
+
+        /* Map IDI to resource id */
+        if (bIcon && lpszName >= IDI_APPLICATION && lpszName <= IDI_SHIELD)
+        {
+            SIZE_T id = 100 + (SIZE_T)lpszName - (SIZE_T)IDI_APPLICATION;
+            if ((id | 2) == 103)
+                id ^= 2; /* Must swap IDI_ERROR and IDI_WARNING */
+            lpszName = MAKEINTRESOURCEW(id);
+        }
+    }
 
     if(lpszName)
     {
@@ -1454,7 +1768,21 @@ CURSORICON_LoadImageW(
             RtlInitUnicodeString(&ustrRsrc, lpszName);
     }
 
-    if(hinst)
+    if(LDR_IS_RESOURCE(hinst))
+    {
+        /* We don't have a real module for GetModuleFileName, construct a fake name instead.
+         * GetIconInfoEx reveals the name used by Windows. */
+        LPCWSTR fakeNameFmt = sizeof(void*) > 4 ? L"\x01%016IX" : L"\x01%08IX";
+        ustrModule.MaximumLength = 18 * sizeof(WCHAR);
+        ustrModule.Buffer = HeapAlloc(GetProcessHeap(), 0, ustrModule.MaximumLength);
+        if (!ustrModule.Buffer)
+        {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return NULL;
+        }
+        ustrModule.Length = (USHORT)wsprintfW(ustrModule.Buffer, fakeNameFmt, hinst) * sizeof(WCHAR);
+    }
+    else if(hinst)
     {
         DWORD size = MAX_PATH;
         /* Get the module name string */
@@ -1483,8 +1811,8 @@ CURSORICON_LoadImageW(
             }
 
             ustrModule.Buffer[ret] = UNICODE_NULL;
-            ustrModule.Length = ret * sizeof(WCHAR);
-            ustrModule.MaximumLength = size * sizeof(WCHAR);
+            ustrModule.Length = (USHORT)(ret * sizeof(WCHAR));
+            ustrModule.MaximumLength = (USHORT)(size * sizeof(WCHAR));
             break;
         }
     }
@@ -1953,6 +2281,12 @@ User32CallCopyImageFromKernel(PVOID Arguments, ULONG ArgumentLength)
 
 /************* PUBLIC FUNCTIONS *******************/
 
+#define COPYIMAGE_VALID_FLAGS ( \
+    LR_SHARED | LR_COPYFROMRESOURCE | LR_CREATEDIBSECTION | LR_LOADMAP3DCOLORS | 0x800 | \
+    LR_VGACOLOR | LR_LOADREALSIZE | LR_DEFAULTSIZE | LR_LOADTRANSPARENT | LR_LOADFROMFILE | \
+    LR_COPYDELETEORG | LR_COPYRETURNORG | LR_COLOR | LR_MONOCHROME \
+)
+
 HANDLE WINAPI CopyImage(
   _In_  HANDLE hImage,
   _In_  UINT uType,
@@ -1963,13 +2297,62 @@ HANDLE WINAPI CopyImage(
 {
     TRACE("hImage=%p, uType=%u, cxDesired=%d, cyDesired=%d, fuFlags=%x\n",
         hImage, uType, cxDesired, cyDesired, fuFlags);
+
+    if (fuFlags & ~COPYIMAGE_VALID_FLAGS)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
     switch(uType)
     {
         case IMAGE_BITMAP:
+            if (!hImage)
+            {
+                SetLastError(ERROR_INVALID_HANDLE);
+                break;
+            }
             return BITMAP_CopyImage(hImage, cxDesired, cyDesired, fuFlags);
         case IMAGE_CURSOR:
         case IMAGE_ICON:
-            return CURSORICON_CopyImage(hImage, uType == IMAGE_ICON, cxDesired, cyDesired, fuFlags);
+        {
+            HANDLE handle;
+            if (!hImage)
+            {
+                SetLastError(ERROR_INVALID_CURSOR_HANDLE);
+                break;
+            }
+            handle = CURSORICON_CopyImage(hImage, uType == IMAGE_ICON, cxDesired, cyDesired, fuFlags);
+            if (!handle && (fuFlags & LR_COPYFROMRESOURCE))
+            {
+                /* Test if the hImage is the same size as what we want by getting
+                 * its BITMAP and comparing its dimensions to the desired size. */
+                BITMAP bm;
+
+                ICONINFO iconinfo = { 0 };
+                if (!GetIconInfo(hImage, &iconinfo))
+                {
+                    ERR("GetIconInfo Failed. hImage %p\n", hImage);
+                    return NULL;
+                }
+                if (!GetObject(iconinfo.hbmColor, sizeof(bm), &bm))
+                {
+                    ERR("GetObject Failed. iconinfo %p\n", iconinfo);
+                    return NULL;
+                }
+
+                DeleteObject(iconinfo.hbmMask);
+                DeleteObject(iconinfo.hbmColor);
+
+                /* If the images are the same size remove LF_COPYFROMRESOURCE and try again */
+                if (cxDesired == bm.bmWidth && cyDesired == bm.bmHeight)
+                {
+                    handle = CURSORICON_CopyImage(hImage, uType == IMAGE_ICON, cxDesired,
+                                                  cyDesired, (fuFlags & ~LR_COPYFROMRESOURCE));
+                }
+            }
+            return handle;
+        }
         default:
             SetLastError(ERROR_INVALID_PARAMETER);
             break;
@@ -2422,8 +2805,16 @@ HICON WINAPI CreateIconFromResourceEx(
     CURSORDATA cursorData;
     HICON hIcon;
     BOOL isAnimated;
+    PBYTE pbBmpIcon = NULL;
+    DWORD BmpIconSize;
 
     TRACE("%p, %lu, %lu, %lu, %i, %i, %lu.\n", pbIconBits, cbIconBits, fIcon, dwVersion, cxDesired, cyDesired, uFlags);
+
+    if (!pbIconBits || cbIconBits < 2 * sizeof(DWORD))
+    {
+        ERR("Invalid IconBits array\n");
+        return NULL;
+    }
 
     if(uFlags & LR_DEFAULTSIZE)
     {
@@ -2434,7 +2825,7 @@ HICON WINAPI CreateIconFromResourceEx(
     ZeroMemory(&cursorData, sizeof(cursorData));
     cursorData.cx = cxDesired;
     cursorData.cy = cyDesired;
-    cursorData.rt = (USHORT)((ULONG_PTR)(fIcon ? RT_ICON : RT_CURSOR));
+    cursorData.rt = LOWORD(fIcon ? RT_ICON : RT_CURSOR);
 
     /* Convert to win32k-ready data */
     if(!memcmp(pbIconBits, "RIFF", 4))
@@ -2505,16 +2896,31 @@ HICON WINAPI CreateIconFromResourceEx(
             pbIconBits = (PBYTE)pt;
         }
 
-        if (!CURSORICON_GetCursorDataFromBMI(&cursorData, (BITMAPINFO*)pbIconBits))
-        {
-            ERR("Couldn't fill the CURSORDATA structure.\n");
-            if (ResHandle)
-                FreeResource(ResHandle);
-            return NULL;
-        }
-        if (ResHandle)
-            FreeResource(ResHandle);
         isAnimated = FALSE;
+
+        /* Try to load BMP icon */
+        if (!CURSORICON_GetCursorDataFromBMI(&cursorData, (PBITMAPINFO)pbIconBits))
+        {
+            /* Convert PNG raw data to BMP icon if the icon was PNG icon */
+            pbBmpIcon = CURSORICON_ConvertPngToBmpIcon(pbIconBits, cbIconBits, &BmpIconSize);
+            if (!pbBmpIcon)
+                return NULL; /* Not PNG icon or failed */
+
+            /* Find icon entry from BMP icon */
+            CURSORICONFILEDIR *dir = (CURSORICONFILEDIR *)pbBmpIcon;
+            CURSORICONFILEDIRENTRY *entry = &dir->idEntries[0]; /* Only one entry */
+
+            /* A bit of preparation */
+            RtlZeroMemory(&cursorData, sizeof(cursorData));
+            cursorData.rt = LOWORD(fIcon ? RT_ICON : RT_CURSOR);
+
+            /* Can we load this BMP icon? */
+            if (!CURSORICON_GetCursorDataFromBMI(&cursorData, (PBITMAPINFO)&pbBmpIcon[entry->dwDIBOffset]))
+            {
+                ERR("Couldn't get cursor/icon data\n");
+                goto end_error;
+            }
+        }
     }
 
     if (uFlags & LR_SHARED)
@@ -2534,15 +2940,17 @@ HICON WINAPI CreateIconFromResourceEx(
     if(isAnimated)
         HeapFree(GetProcessHeap(), 0, cursorData.aspcur);
 
+    HeapFree(GetProcessHeap(), 0, pbBmpIcon);
     return hIcon;
 
     /* Clean up */
 end_error:
+    HeapFree(GetProcessHeap(), 0, pbBmpIcon);
     if(isAnimated)
         HeapFree(GetProcessHeap(), 0, cursorData.aspcur);
-    DeleteObject(cursorData.hbmMask);
-    if(cursorData.hbmColor) DeleteObject(cursorData.hbmColor);
-    if(cursorData.hbmAlpha) DeleteObject(cursorData.hbmAlpha);
+    if (cursorData.hbmMask) DeleteObject(cursorData.hbmMask);
+    if (cursorData.hbmColor) DeleteObject(cursorData.hbmColor);
+    if (cursorData.hbmAlpha) DeleteObject(cursorData.hbmAlpha);
 
     return NULL;
 }

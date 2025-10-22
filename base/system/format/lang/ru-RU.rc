@@ -1,11 +1,17 @@
-/* Russian translation by Dmitry Chapyshev, 2007-06-10 */
+/*
+ * PROJECT:     Disk Format Utility
+ * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
+ * PURPOSE:     Russian resource file
+ * TRANSLATORS: Copyright 2007 Dmitry Chapyshev <lentind@yandex.ru>
+ *              Copyright 2014 Kudratov Olimjon <olim98@bk.ru>
+ */
 
 LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
 
 STRINGTABLE
 BEGIN
     STRING_HELP "Использование: %s том: [-FS:система] [-V:метка] [-Q] [-A:размер] [-C]\n\n\
-  том:           Указывает букву диска (с последующим двоеточием),\n\
+  [том:]         Указывает букву диска (с последующим двоеточием),\n\
                  точку подключения или имя тома.\n\
   -FS:система    Указывает тип файловой системы (%s).\n\
   -V:метка       Метка тома.\n\
@@ -23,7 +29,7 @@ BEGIN
     STRING_FMIFS_FAIL "Невозможно определить расположение точек входа FMIFS.\n\n"
     STRING_UNKNOW_ARG "Неправильные аргументы: %s\n"
     STRING_DRIVE_PARM "Требуемый параметр операции отсутствует.\n\n"
-    STRING_ERROR_DRIVE_TYPE "Не удалось получить тип тома"
+    STRING_ERROR_DRIVE_TYPE "Не удалось получить тип тома.\n"
     STRING_INSERT_DISK "Вставьте чистый диск в устройство чтения %C:\nи нажмите Enter для продолжения..."
     STRING_NO_VOLUME "Не удалось выполнить запрос к тому"
     STRING_NO_VOLUME_SIZE "Не удалось определить размер тома"

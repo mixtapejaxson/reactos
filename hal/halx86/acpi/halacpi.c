@@ -37,7 +37,7 @@ LIST_ENTRY HalpAcpiTableMatchList;
 
 ULONG HalpInvalidAcpiTable;
 
-ULONG HalpPicVectorRedirect[] = {0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15};
+ULONG HalpPicVectorRedirect[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
 /* This determines the HAL type */
 BOOLEAN HalDisableFirmwareMapper = TRUE;
@@ -779,7 +779,7 @@ HaliAcpiTimerInit(IN ULONG TimerPort,
         /* Get the data from the FADT */
         TimerPort = HalpFixedAcpiDescTable.pm_tmr_blk_io_port;
         TimerValExt = HalpFixedAcpiDescTable.flags & ACPI_TMR_VAL_EXT;
-        DPRINT1("ACPI Timer at: %Xh (EXT: %d)\n", TimerPort, TimerValExt);
+        DPRINT1("ACPI Timer at: %lXh (EXT: %lu)\n", TimerPort, TimerValExt);
     }
 
     /* FIXME: Now proceed to the timer initialization */
@@ -851,12 +851,12 @@ HalpSetupAcpiPhase0(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         /* Allocate it */
         HalpLowStubPhysicalAddress.QuadPart = HalpAllocPhysicalMemory(LoaderBlock,
                                                                       0x100000,
-                                                                      1,
+                                                                      HALP_LOW_STUB_SIZE_IN_PAGES,
                                                                       FALSE);
         if (HalpLowStubPhysicalAddress.QuadPart)
         {
             /* Map it */
-            HalpLowStub = HalpMapPhysicalMemory64(HalpLowStubPhysicalAddress, 1);
+            HalpLowStub = HalpMapPhysicalMemory64(HalpLowStubPhysicalAddress, HALP_LOW_STUB_SIZE_IN_PAGES);
         }
     }
 
@@ -871,34 +871,85 @@ HalpSetupAcpiPhase0(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Setup the boot table */
     HalpInitBootTable(LoaderBlock);
 
-    /* Debugging code */
+    /* Log some ACPI data */
     {
-        PLIST_ENTRY ListHead, NextEntry;
-        PACPI_CACHED_TABLE CachedTable;
+        PLIST_ENTRY NextEntry;
+        PCSTR AcpiVersion = NULL;
 
-        /* Loop cached tables */
-        ListHead = &HalpAcpiTableCacheList;
-        NextEntry = ListHead->Flink;
-        while (NextEntry != ListHead)
+        /* Find the ACPI version (range) out */
+        // v1.0+: Revision is major version.
+        // v5.1+: minor_revision is minor version.
+        // v6.4+: errata bits are errata version.
+        switch (Fadt->Header.Revision)
         {
-            /* Get the table */
-            CachedTable = CONTAINING_RECORD(NextEntry, ACPI_CACHED_TABLE, Links);
+            case 0: // Should not happen.
+                AcpiVersion = "Unknown_0";
+                break;
+            case 1:
+                AcpiVersion = "1.0-1.0b";
+                break;
+            case 2: // Should not happen.
+                AcpiVersion = "Unknown_2";
+                break;
+            case 3:
+                AcpiVersion = "1.5-2.0_C";
+                break;
+            case 4:
+                AcpiVersion = "3.0-4.0_A";
+                break;
+            case 5:
+                if (Fadt->minor_revision == 0)
+                    AcpiVersion = "5.0-5.0_B";
+                else if (Fadt->minor_revision == 1)
+                    AcpiVersion = "5.1-5.1_B";
+                break;
+            case 6:
+                if (Fadt->minor_revision == 0)
+                    AcpiVersion = "6.0-6.0_A";
+                else if (Fadt->minor_revision == 1)
+                    AcpiVersion = "6.1-6.1_A";
+                else if (Fadt->minor_revision == 2)
+                    AcpiVersion = "6.2-6.2_B";
+                else if (Fadt->minor_revision == 3)
+                    AcpiVersion = "6.3-6.3_A";
+                else if ((Fadt->minor_revision & 0x0F) == 0x04)
+                {
+                    if ((Fadt->minor_revision & 0xF0) == 0x00)
+                        AcpiVersion = "6.4";
+                    else if ((Fadt->minor_revision & 0xF0) == 0x10)
+                        AcpiVersion = "6.4_A";
+                }
+                else if (Fadt->minor_revision == 5) // v6.5_A too is documented as errata=0.
+                    AcpiVersion = "6.5-6.6";
+                break;
+        }
 
-            /* Compare signatures */
-            if ((CachedTable->Header.Signature == RSDT_SIGNATURE) ||
-                (CachedTable->Header.Signature == XSDT_SIGNATURE))
-            {
-                DPRINT1("ACPI %d.0 Detected. Tables: ", (CachedTable->Header.Revision + 1));
-            }
+        /* Print the ACPI version */
+        DPRINT1("ACPI v");
+        if (AcpiVersion == NULL)
+        {
+            // Unknown past values, or newer than v6.6 (documented as 6.5).
+            DbgPrint("Unknown_%u_%u", Fadt->Header.Revision, Fadt->minor_revision);
+        }
+        else
+        {
+            DbgPrint("%s", AcpiVersion);
+        }
+        DbgPrint(" detected. Tables:");
 
-            DbgPrint("[%c%c%c%c] ",
-                    (CachedTable->Header.Signature & 0xFF),
-                    (CachedTable->Header.Signature & 0xFF00) >> 8,
-                    (CachedTable->Header.Signature & 0xFF0000) >> 16,
-                    (CachedTable->Header.Signature & 0xFF000000) >> 24);
+        /* List cached tables */
+        for (NextEntry = HalpAcpiTableCacheList.Flink;
+             NextEntry != &HalpAcpiTableCacheList;
+             NextEntry = NextEntry->Flink)
+        {
+            PACPI_CACHED_TABLE CachedTable = CONTAINING_RECORD(NextEntry, ACPI_CACHED_TABLE, Links);
 
-            /* Keep going */
-            NextEntry = NextEntry->Flink;
+            /* Print the table signature */
+            DbgPrint(" [%c%c%c%c]",
+                      CachedTable->Header.Signature & 0x000000FF,
+                     (CachedTable->Header.Signature & 0x0000FF00) >>  8,
+                     (CachedTable->Header.Signature & 0x00FF0000) >> 16,
+                     (CachedTable->Header.Signature & 0xFF000000) >> 24);
         }
         DbgPrint("\n");
     }
@@ -1016,18 +1067,19 @@ NTAPI
 HalpQueryAcpiResourceRequirements(OUT PIO_RESOURCE_REQUIREMENTS_LIST *Requirements)
 {
     PIO_RESOURCE_REQUIREMENTS_LIST RequirementsList;
-    ULONG Count = 0, ListSize;
+    ULONG Count, ListSize;
     NTSTATUS Status;
+
     PAGED_CODE();
 
     /* Get ACPI resources */
     HalpAcpiDetectResourceListSize(&Count);
-    DPRINT("Resource count: %d\n", Count);
+    DPRINT("Resource count: %lu\n", Count);
 
     /* Compute size of the list and allocate it */
     ListSize = FIELD_OFFSET(IO_RESOURCE_REQUIREMENTS_LIST, List[0].Descriptors) +
                (Count * sizeof(IO_RESOURCE_DESCRIPTOR));
-    DPRINT("Resource list size: %d\n", ListSize);
+    DPRINT("Resource list size: %lu\n", ListSize);
     RequirementsList = ExAllocatePoolWithTag(PagedPool, ListSize, TAG_HAL);
     if (RequirementsList)
     {

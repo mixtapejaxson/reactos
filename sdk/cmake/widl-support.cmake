@@ -1,11 +1,11 @@
 
 #idl files support
 if(ARCH STREQUAL "i386")
-    set(IDL_FLAGS -m32 --win32)
+    set(IDL_FLAGS -m32 --win32 -b i386-x-y)
 elseif(ARCH STREQUAL "amd64")
-    set(IDL_FLAGS -m64 --win64)
+    set(IDL_FLAGS -m64 --win64 -b amd64-x-y)
 else()
-    set(IDL_FLAGS "")
+    set(IDL_FLAGS -b ${ARCH}-x-y)
 endif()
 
 function(add_typelib)
@@ -103,16 +103,54 @@ function(add_rpc_files __type)
     endforeach()
 endfunction()
 
+function(add_rpc_file __type __idl_file)
+    cmake_parse_arguments(__args "" "ACF;PREFIX_ALL;PREFIX_CLIENT;PREFIX_SERVER" "" ${ARGN})
+    get_includes(INCLUDES)
+    get_defines(DEFINES)
+    set(__additional_flags -Oif)
+    # Is it a client or server module?
+    if(__type STREQUAL "server")
+        set(__server_client -s)
+        set(__suffix _s)
+    elseif(__type STREQUAL "client")
+        set(__server_client -c)
+        set(__suffix _c)
+    else()
+        message(FATAL_ERROR "Please pass either server or client as argument to add_rpc_files")
+    endif()
+    if(__args_ACF)
+        set(__additional_flags ${__additional_flags} --acf=${__args_ACF})
+    endif()
+    if (__args_PREFIX_ALL)
+        set(__additional_flags ${__additional_flags} --prefix-all=${__args_PREFIX_ALL})
+    else()
+        if (__args_PREFIX_CLIENT)
+            set(__additional_flags ${__additional_flags} --prefix-client=${__args_PREFIX_CLIENT})
+        endif()
+        if (__args_PREFIX_SERVER)
+            set(__additional_flags ${__additional_flags} --prefix-server=${__args_PREFIX_SERVER})
+        endif()
+    endif()
+    get_filename_component(__name ${__idl_file} NAME_WE)
+    set(__name ${__name}${__suffix})
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${__name}.c ${CMAKE_CURRENT_BINARY_DIR}/${__name}.h
+        # We generate the two files in two passes because WIDL accepts only one custom file name as output
+        COMMAND native-widl ${INCLUDES} ${DEFINES} ${IDL_FLAGS} ${__additional_flags} ${__server_client} -o ${CMAKE_CURRENT_BINARY_DIR}/${__name}.c -H ${__name}.h ${__idl_file}
+        COMMAND native-widl ${INCLUDES} ${DEFINES} ${IDL_FLAGS} ${__additional_flags} -h -o ${CMAKE_CURRENT_BINARY_DIR}/${__name}.h ${__idl_file}
+        DEPENDS ${__idl_file} native-widl
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endfunction()
+
 function(generate_idl_iids)
     foreach(IDL_FILE ${ARGN})
-        get_filename_component(FILE ${IDL_FILE} NAME)
         get_includes(INCLUDES)
         get_defines(DEFINES)
         get_filename_component(NAME ${IDL_FILE} NAME_WE)
         add_custom_command(
             OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${NAME}_i.c
             COMMAND native-widl ${INCLUDES} ${DEFINES} ${IDL_FLAGS} -u -o ${CMAKE_CURRENT_BINARY_DIR}/${NAME}_i.c ${IDL_FILE}
-            DEPENDS ${IDL_FILE_FULL} native-widl
+            DEPENDS ${IDL_FILE} native-widl
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     endforeach()
 endfunction()
@@ -135,7 +173,7 @@ function(add_idl_reg_script IDL_FILE)
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${NAME}_r.res
         COMMAND native-widl ${INCLUDES} ${DEFINES} ${IDL_FLAGS} -r -o ${CMAKE_CURRENT_BINARY_DIR}/${NAME}_r.res ${IDL_FILE}
-        DEPENDS ${IDL_FILE_FULL} native-widl
+        DEPENDS ${IDL_FILE} native-widl
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${NAME}_r.res PROPERTIES
         GENERATED TRUE EXTERNAL_OBJECT TRUE)

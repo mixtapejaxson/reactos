@@ -26,7 +26,7 @@
 /* the version of NDIS we claim to be */
 #define NDIS_VERSION 0x00050001
 
-#define NDIS_TAG  0x4e4d4953
+#define NDIS_TAG 'SIDN' // "NDIS"
 
 #define MIN(value1, value2) \
     ((value1 < value2)? value1 : value2)
@@ -45,8 +45,8 @@
 VOID
 NTAPI
 ExGetCurrentProcessorCounts(
-   PULONG ThreadKernelTime,
-   PULONG TotalCpuTime,
+   PULONG IdleTime,
+   PULONG KernelAndUserTime,
    PULONG ProcessorNumber);
 
 VOID

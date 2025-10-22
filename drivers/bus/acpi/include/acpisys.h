@@ -42,6 +42,7 @@ typedef struct _PDO_DEVICE_DATA
     // An array of (zero terminated wide character strings).
     // The array itself also null terminated
     PWCHAR      HardwareIDs;
+    BOOLEAN     DockDevice;
     // Link point to hold all the PDOs for a single bus together
     LIST_ENTRY  Link;
     ULONG       InterfaceRefCount;
@@ -95,8 +96,9 @@ ACPIEnumerateDevices(
 
 NTSTATUS
 NTAPI
-Bus_PDO_EvalMethod(PPDO_DEVICE_DATA DeviceData,
-                   PIRP Irp);
+Bus_PDO_EvalMethod(
+    _In_ PPDO_DEVICE_DATA DeviceData,
+    _Inout_ PIRP Irp);
 
 NTSTATUS
 NTAPI
@@ -114,13 +116,6 @@ PCHAR
 PnPMinorFunctionString (
     UCHAR MinorFunction
 );
-
-NTSTATUS
-NTAPI
-Bus_AddDevice(
-    PDRIVER_OBJECT DriverObject,
-    PDEVICE_OBJECT PhysicalDeviceObject
-    );
 
 NTSTATUS
 Bus_SendIrpSynchronously (

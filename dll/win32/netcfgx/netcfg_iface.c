@@ -1,25 +1,11 @@
 #include "precomp.h"
 
-typedef struct
-{
-    const INetCfg * lpVtbl;
-    const INetCfgLock * lpVtblLock;
-    const INetCfgPnpReconfigCallback *lpVtblPnpReconfigCallback;
-    LONG                       ref;
-    BOOL bInitialized;
-    HANDLE hMutex;
-    NetCfgComponentItem *pNet;
-    NetCfgComponentItem * pService;
-    NetCfgComponentItem * pClient;
-    NetCfgComponentItem * pProtocol;
-} INetCfgImpl, *LPINetCfgImpl;
-
-static __inline LPINetCfgImpl impl_from_INetCfgLock(INetCfgLock *iface)
+static __inline INetCfgImpl* impl_from_INetCfgLock(INetCfgLock *iface)
 {
     return (INetCfgImpl*)((char *)iface - FIELD_OFFSET(INetCfgImpl, lpVtblLock));
 }
 
-static __inline LPINetCfgImpl impl_from_INetCfgPnpReconfigCallback(INetCfgPnpReconfigCallback *iface)
+static __inline INetCfgImpl* impl_from_INetCfgPnpReconfigCallback(INetCfgPnpReconfigCallback *iface)
 {
     return (INetCfgImpl*)((char *)iface - FIELD_OFFSET(INetCfgImpl, lpVtblPnpReconfigCallback));
 }
@@ -845,7 +831,7 @@ INetCfg_fnQueryNetCfgClass(
     REFIID riid,
     void **ppvObject)
 {
-    return E_FAIL;
+    return INetCfgClass_Constructor((IUnknown *)iface, riid, ppvObject, pguidClass, iface);
 }
 
 static const INetCfgVtbl vt_NetCfg =

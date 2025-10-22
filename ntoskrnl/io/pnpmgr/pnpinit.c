@@ -14,12 +14,6 @@
 
 /* GLOBALS ********************************************************************/
 
-typedef struct _IOPNP_DEVICE_EXTENSION
-{
-    PWCHAR CompatibleIdList;
-    ULONG CompatibleIdListSize;
-} IOPNP_DEVICE_EXTENSION, *PIOPNP_DEVICE_EXTENSION;
-
 PUNICODE_STRING PiInitGroupOrderTable;
 USHORT PiInitGroupOrderTableCount;
 INTERFACE_TYPE PnpDefaultInterfaceType;
@@ -34,11 +28,11 @@ ARBITER_INSTANCE IopRootPortArbiter;
 
 extern KEVENT PiEnumerationFinished;
 
-NTSTATUS NTAPI IopPortInitialize(VOID);
-NTSTATUS NTAPI IopMemInitialize(VOID);
-NTSTATUS NTAPI IopDmaInitialize(VOID);
-NTSTATUS NTAPI IopIrqInitialize(VOID);
-NTSTATUS NTAPI IopBusNumberInitialize(VOID);
+NTSTATUS NTAPI IopArbPortInitialize(VOID);
+NTSTATUS NTAPI IopArbMemInitialize(VOID);
+NTSTATUS NTAPI IopArbDmaInitialize(VOID);
+NTSTATUS NTAPI IopArbIrqInitialize(VOID);
+NTSTATUS NTAPI IopArbBusNumberInitialize(VOID);
 
 /* FUNCTIONS ******************************************************************/
 
@@ -56,38 +50,38 @@ IopInitializeArbiters(VOID)
 {
     NTSTATUS Status;
 
-    Status = IopPortInitialize();
+    Status = IopArbPortInitialize();
     if (!NT_SUCCESS(Status))
     {
-        DPRINT1("IopPortInitialize() return %X\n", Status);
+        DPRINT1("IopArbPortInitialize() return %X\n", Status);
         return Status;
     }
 
-    Status = IopMemInitialize();
+    Status = IopArbMemInitialize();
     if (!NT_SUCCESS(Status))
     {
-        DPRINT1("IopMemInitialize() return %X\n", Status);
+        DPRINT1("IopArbMemInitialize() return %X\n", Status);
         return Status;
     }
 
-    Status = IopDmaInitialize();
+    Status = IopArbDmaInitialize();
     if (!NT_SUCCESS(Status))
     {
-        DPRINT1("IopDmaInitialize() return %X\n", Status);
+        DPRINT1("IopArbDmaInitialize() return %X\n", Status);
         return Status;
     }
 
-    Status = IopIrqInitialize();
+    Status = IopArbIrqInitialize();
     if (!NT_SUCCESS(Status))
     {
-        DPRINT1("IopIrqInitialize() return %X\n", Status);
+        DPRINT1("IopArbIrqInitialize() return %X\n", Status);
         return Status;
     }
 
-    Status = IopBusNumberInitialize();
+    Status = IopArbBusNumberInitialize();
     if (!NT_SUCCESS(Status))
     {
-        DPRINT1("IopBusNumberInitialize() return %X\n", Status);
+        DPRINT1("IopArbBusNumberInitialize() return %X\n", Status);
     }
 
     return Status;
@@ -412,7 +406,7 @@ IopInitializePlugPlayServices(VOID)
 
     /* Create the root PDO */
     Status = IoCreateDevice(IopRootDriverObject,
-                            sizeof(IOPNP_DEVICE_EXTENSION),
+                            0,
                             NULL,
                             FILE_DEVICE_CONTROLLER,
                             0,
@@ -441,9 +435,7 @@ IopInitializePlugPlayServices(VOID)
         KeBugCheckEx(PHASE1_INITIALIZATION_FAILED, Status, 0, 0, 0);
     }
 
-    /* Call the add device routine */
-    IopRootDriverObject->DriverExtension->AddDevice(IopRootDriverObject,
-                                                    IopRootDeviceNode->PhysicalDeviceObject);
+    PnpRootInitializeDevExtension();
 
     PiSetDevNodeState(IopRootDeviceNode, DeviceNodeStarted);
 
@@ -457,7 +449,7 @@ IopInitializePlugPlayServices(VOID)
     ExInitializeFastMutex(&PnpBusTypeGuidList->Lock);
 
     /* Initialize PnP root relations (this is a syncronous operation) */
-    PiQueueDeviceAction(IopRootDeviceNode->PhysicalDeviceObject, PiActionEnumRootDevices, NULL, NULL);
+    PiQueueDeviceAction(Pdo, PiActionEnumRootDevices, NULL, NULL);
 
     /* Launch the firmware mapper */
     Status = IopUpdateRootKey();
@@ -467,7 +459,7 @@ IopInitializePlugPlayServices(VOID)
     NtClose(KeyHandle);
 
     /* Initialize PnP root relations (this is a syncronous operation) */
-    PiQueueDeviceAction(IopRootDeviceNode->PhysicalDeviceObject, PiActionEnumRootDevices, NULL, NULL);
+    PiQueueDeviceAction(Pdo, PiActionEnumRootDevices, NULL, NULL);
 
     /* We made it */
     return STATUS_SUCCESS;

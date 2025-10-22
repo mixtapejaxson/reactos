@@ -275,7 +275,7 @@ IntSetDIBits(
     else
     {
         /* Compressed format without a size. This is invalid. */
-        DPRINT1("Compressed format without a size!");
+        DPRINT1("Compressed format without a size\n");
         return 0;
     }
 
@@ -518,7 +518,21 @@ NtGdiSetDIBitsToDeviceInternal(
     }
     _SEH2_END;
 
-    ScanLines = min(ScanLines, abs(bmi->bmiHeader.biHeight) - StartScan);
+    DPRINT("StartScan %d ScanLines %d Bits %p bmi %p ColorUse %d\n"
+           "    Height %d Width %d biSizeImage %d\n"
+           "    biHeight %d biWidth %d biBitCount %d\n"
+           "    XSrc %d YSrc %d XDest %d YDest %d\n",
+           StartScan, ScanLines, Bits, bmi, ColorUse,
+           Height, Width, bmi->bmiHeader.biSizeImage,
+           bmi->bmiHeader.biHeight, bmi->bmiHeader.biWidth,
+           bmi->bmiHeader.biBitCount,
+           XSrc, YSrc, XDest, YDest);
+
+    if (YDest < 0)
+    {
+        ScanLines = min(ScanLines, abs(bmi->bmiHeader.biHeight) - StartScan);
+    }
+
     if (ScanLines == 0)
     {
         DPRINT1("ScanLines == 0\n");
@@ -686,7 +700,6 @@ Exit:
 
     return ret;
 }
-
 
 /* Converts a device-dependent bitmap to a DIB */
 INT
@@ -1194,7 +1207,6 @@ cleanup:
     return iResult;
 }
 
-
 W32KAPI
 INT
 APIENTRY
@@ -1512,7 +1524,6 @@ NtGdiStretchDIBitsInternal(
 
     return LinesCopied;
 }
-
 
 HBITMAP
 FASTCALL
@@ -1994,7 +2005,6 @@ DIB_CreateDIBSection(
 
 //  hSecure = MmSecureVirtualMemory(bm.bmBits, totalSize, PAGE_READWRITE);
     hSecure = (HANDLE)0x1; // HACK OF UNIMPLEMENTED KERNEL STUFF !!!!
-
 
     // Create Device Dependent Bitmap and add DIB pointer
     //Size.cx = bm.bmWidth;

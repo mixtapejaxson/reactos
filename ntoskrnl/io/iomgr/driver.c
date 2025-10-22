@@ -5,7 +5,7 @@
  * PURPOSE:         Driver Object Management
  * PROGRAMMERS:     Alex Ionescu (alex.ionescu@reactos.org)
  *                  Filip Navara (navaraf@reactos.org)
- *                  Hervé Poussineau (hpoussin@reactos.org)
+ *                  HervÃ© Poussineau (hpoussin@reactos.org)
  */
 
 /* INCLUDES *******************************************************************/
@@ -33,7 +33,6 @@ static const WCHAR ServicesKeyName[] = L"\\Registry\\Machine\\System\\CurrentCon
 
 POBJECT_TYPE IoDriverObjectType = NULL;
 
-extern BOOLEAN ExpInTextModeSetup;
 extern BOOLEAN PnpSystemInit;
 extern BOOLEAN PnPBootDriversLoaded;
 extern KEVENT PiEnumerationFinished;
@@ -137,13 +136,19 @@ IopGetDriverNames(
     if (NT_SUCCESS(status))
     {
         /* We've got the ObjectName, use it as the driver name */
-        if (kvInfo->Type != REG_SZ || kvInfo->DataLength == 0)
+        if ((kvInfo->Type != REG_SZ) ||
+            (kvInfo->DataLength < sizeof(UNICODE_NULL)) ||
+            (kvInfo->DataLength > UNICODE_STRING_MAX_BYTES) ||
+            ((kvInfo->DataLength % sizeof(WCHAR)) != 0))
         {
+            DPRINT1("ObjectName invalid (Type = %lu, DataLength = %lu)\n",
+                    kvInfo->Type,
+                    kvInfo->DataLength);
             ExFreePool(kvInfo);
             return STATUS_ILL_FORMED_SERVICE_ENTRY;
         }
 
-        driverName.Length = kvInfo->DataLength - sizeof(UNICODE_NULL);
+        driverName.Length = (USHORT)(kvInfo->DataLength - sizeof(UNICODE_NULL));
         driverName.MaximumLength = kvInfo->DataLength;
         driverName.Buffer = ExAllocatePoolWithTag(NonPagedPool, driverName.MaximumLength, TAG_IO);
         if (!driverName.Buffer)
@@ -273,60 +278,75 @@ Cleanup:
     return status;
 }
 
-/*
- * RETURNS
- *  TRUE if String2 contains String1 as a suffix.
- */
-BOOLEAN
-NTAPI
+/**
+ * @brief   Determines whether String1 may be a suffix of String2.
+ * @return  TRUE if String2 contains String1 as a suffix.
+ **/
+static BOOLEAN
 IopSuffixUnicodeString(
-    IN PCUNICODE_STRING String1,
-    IN PCUNICODE_STRING String2)
+    _In_ PCUNICODE_STRING String1,
+    _In_ PCUNICODE_STRING String2,
+    _In_ BOOLEAN CaseInSensitive)
 {
-    PWCHAR pc1;
-    PWCHAR pc2;
-    ULONG Length;
+    PWCHAR pc1, pc2;
+    ULONG NumChars;
 
     if (String2->Length < String1->Length)
         return FALSE;
 
-    Length = String1->Length / 2;
+    NumChars = String1->Length / sizeof(WCHAR);
     pc1 = String1->Buffer;
-    pc2 = &String2->Buffer[String2->Length / sizeof(WCHAR) - Length];
+    pc2 = &String2->Buffer[String2->Length / sizeof(WCHAR) - NumChars];
 
     if (pc1 && pc2)
     {
-        while (Length--)
+        if (CaseInSensitive)
         {
-            if( *pc1++ != *pc2++ )
-                return FALSE;
+            while (NumChars--)
+            {
+                if (RtlUpcaseUnicodeChar(*pc1++) !=
+                    RtlUpcaseUnicodeChar(*pc2++))
+                {
+                    return FALSE;
+                }
+            }
         }
+        else
+        {
+            while (NumChars--)
+            {
+                if (*pc1++ != *pc2++)
+                    return FALSE;
+            }
+        }
+
         return TRUE;
     }
+
     return FALSE;
 }
 
-/*
- * IopDisplayLoadingMessage
- *
- * Display 'Loading XXX...' message.
- */
-VOID
+/**
+ * @brief   Displays a driver-loading message in SOS mode.
+ **/
+static VOID
 FASTCALL
-IopDisplayLoadingMessage(PUNICODE_STRING ServiceName)
+IopDisplayLoadingMessage(
+    _In_ PCUNICODE_STRING ServiceName)
 {
+    extern BOOLEAN SosEnabled; // See ex/init.c
+    static const UNICODE_STRING DotSys = RTL_CONSTANT_STRING(L".SYS");
     CHAR TextBuffer[256];
-    UNICODE_STRING DotSys = RTL_CONSTANT_STRING(L".SYS");
 
-    if (ExpInTextModeSetup) return;
+    if (!SosEnabled) return;
     if (!KeLoaderBlock) return;
-    RtlUpcaseUnicodeString(ServiceName, ServiceName, FALSE);
-    snprintf(TextBuffer, sizeof(TextBuffer),
-            "%s%sSystem32\\Drivers\\%wZ%s\r\n",
-            KeLoaderBlock->ArcBootDeviceName,
-            KeLoaderBlock->NtBootPathName,
-            ServiceName,
-            IopSuffixUnicodeString(&DotSys, ServiceName) ? "" : ".SYS");
+    RtlStringCbPrintfA(TextBuffer, sizeof(TextBuffer),
+                       "%s%sSystem32\\Drivers\\%wZ%s\r\n",
+                       KeLoaderBlock->ArcBootDeviceName,
+                       KeLoaderBlock->NtBootPathName,
+                       ServiceName,
+                       IopSuffixUnicodeString(&DotSys, ServiceName, TRUE)
+                           ? "" : ".SYS");
     HalDisplayString(TextBuffer);
 }
 
@@ -942,20 +962,26 @@ IopInitializeBuiltinDriver(IN PLDR_DATA_TABLE_ENTRY BootLdrEntry)
         {
             WCHAR num[11];
             UNICODE_STRING instancePath;
-            RtlStringCchPrintfW(num, sizeof(num), L"%u", i);
+            RtlStringCbPrintfW(num, sizeof(num), L"%u", i);
 
             Status = IopGetRegistryValue(enumServiceHandle, num, &kvInfo);
             if (!NT_SUCCESS(Status))
             {
                 continue;
             }
-            if (kvInfo->Type != REG_SZ || kvInfo->DataLength == 0)
+            if ((kvInfo->Type != REG_SZ) ||
+                (kvInfo->DataLength < sizeof(UNICODE_NULL)) ||
+                (kvInfo->DataLength > UNICODE_STRING_MAX_BYTES) ||
+                ((kvInfo->DataLength % sizeof(WCHAR)) != 0))
             {
+                DPRINT1("ObjectName invalid (Type = %lu, DataLength = %lu)\n",
+                        kvInfo->Type,
+                        kvInfo->DataLength);
                 ExFreePool(kvInfo);
                 continue;
             }
 
-            instancePath.Length = kvInfo->DataLength - sizeof(UNICODE_NULL);
+            instancePath.Length = (USHORT)(kvInfo->DataLength - sizeof(UNICODE_NULL));
             instancePath.MaximumLength = kvInfo->DataLength;
             instancePath.Buffer = ExAllocatePoolWithTag(NonPagedPool,
                                                         instancePath.MaximumLength,
@@ -1199,8 +1225,8 @@ IopInitializeSystemDrivers(VOID)
 
     PiPerformSyncDeviceAction(IopRootDeviceNode->PhysicalDeviceObject, PiActionEnumDeviceTree);
 
-    /* No system drivers on the boot cd */
-    if (KeLoaderBlock->SetupLdrBlock) return; // ExpInTextModeSetup
+    /* HACK: No system drivers on the BootCD */
+    if (KeLoaderBlock->SetupLdrBlock) return;
 
     /* Get the driver list */
     SavedList = DriverList = CmGetSystemDriverList();
@@ -1934,13 +1960,19 @@ IopLoadDriver(
     Status = IopGetRegistryValue(ServiceHandle, L"ImagePath", &kvInfo);
     if (NT_SUCCESS(Status))
     {
-        if ((kvInfo->Type != REG_EXPAND_SZ && kvInfo->Type != REG_SZ) || kvInfo->DataLength == 0)
+        if ((kvInfo->Type != REG_EXPAND_SZ && kvInfo->Type != REG_SZ) ||
+            (kvInfo->DataLength < sizeof(UNICODE_NULL)) ||
+            (kvInfo->DataLength > UNICODE_STRING_MAX_BYTES) ||
+            ((kvInfo->DataLength % sizeof(WCHAR)) != 0))
         {
+            DPRINT1("ObjectName invalid (Type = %lu, DataLength = %lu)\n",
+                    kvInfo->Type,
+                    kvInfo->DataLength);
             ExFreePool(kvInfo);
             return STATUS_ILL_FORMED_SERVICE_ENTRY;
         }
 
-        ImagePath.Length = kvInfo->DataLength - sizeof(UNICODE_NULL);
+        ImagePath.Length = (USHORT)(kvInfo->DataLength - sizeof(UNICODE_NULL));
         ImagePath.MaximumLength = kvInfo->DataLength;
         ImagePath.Buffer = ExAllocatePoolWithTag(PagedPool, ImagePath.MaximumLength, TAG_RTLREGISTRY);
         if (!ImagePath.Buffer)

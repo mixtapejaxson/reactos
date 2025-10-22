@@ -421,7 +421,7 @@ ConsoleMenuControl(HANDLE hConsoleOutput,
 HANDLE
 WINAPI
 DECLSPEC_HOTPATCH
-DuplicateConsoleHandle(HANDLE hConsole,
+DuplicateConsoleHandle(HANDLE hSourceHandle,
                        DWORD dwDesiredAccess,
                        BOOL bInheritHandle,
                        DWORD dwOptions)
@@ -438,7 +438,7 @@ DuplicateConsoleHandle(HANDLE hConsole,
     }
 
     DuplicateHandleRequest->ConsoleHandle = NtCurrentPeb()->ProcessParameters->ConsoleHandle;
-    DuplicateHandleRequest->SourceHandle  = hConsole;
+    DuplicateHandleRequest->SourceHandle  = hSourceHandle;
     DuplicateHandleRequest->DesiredAccess = dwDesiredAccess;
     DuplicateHandleRequest->InheritHandle = bInheritHandle;
     DuplicateHandleRequest->Options       = dwOptions;
@@ -554,7 +554,7 @@ GetConsoleDisplayMode(LPDWORD lpModeFlags)
 
 /*
  * @implemented (Undocumented)
- * @note See http://cboard.cprogramming.com/windows-programming/102187-console-font-size.html
+ * @note See https://cboard.cprogramming.com/windows-programming/102187-console-font-size.html
  */
 DWORD
 WINAPI
@@ -721,7 +721,7 @@ GetCurrentConsoleFont(IN HANDLE hConsoleOutput,
 
 /*
  * @implemented (Undocumented)
- * @note See http://cboard.cprogramming.com/windows-programming/102187-console-font-size.html
+ * @note See https://cboard.cprogramming.com/windows-programming/102187-console-font-size.html
  */
 DWORD
 WINAPI
@@ -907,7 +907,7 @@ SetConsoleDisplayMode(HANDLE hConsoleOutput,
 
 /*
  * @implemented (Undocumented)
- * @note See http://cboard.cprogramming.com/windows-programming/102187-console-font-size.html
+ * @note See https://cboard.cprogramming.com/windows-programming/102187-console-font-size.html
  */
 BOOL
 WINAPI
@@ -975,12 +975,14 @@ SetConsoleHardwareState(HANDLE hConsoleOutput,
 BOOL
 WINAPI
 DECLSPEC_HOTPATCH
-SetConsoleKeyShortcuts(DWORD Unknown0,
-                       DWORD Unknown1,
-                       DWORD Unknown2,
-                       DWORD Unknown3)
+SetConsoleKeyShortcuts(
+    _In_ BOOL bSet,
+    _In_ BYTE bReserveKeys,
+    _In_reads_(dwNumAppKeys) LPAPPKEY lpAppKeys,
+    _In_ DWORD dwNumAppKeys)
 {
-    DPRINT1("SetConsoleKeyShortcuts(0x%x, 0x%x, 0x%x, 0x%x) UNIMPLEMENTED!\n", Unknown0, Unknown1, Unknown2, Unknown3);
+    DPRINT1("SetConsoleKeyShortcuts(%lu, 0x%x, 0x%p, 0x%x) UNIMPLEMENTED!\n",
+            bSet, bReserveKeys, lpAppKeys, dwNumAppKeys);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -1032,7 +1034,7 @@ SetConsoleMenuClose(BOOL bEnable)
 
 /*
  * @implemented (Undocumented)
- * @note See http://comments.gmane.org/gmane.comp.lang.harbour.devel/27844
+ * @note See http://comments.gmane.org/gmane.comp.lang.harbour.devel/27844 (DEAD_LINK)
  *       Usage example: https://github.com/harbour/core/commit/d79a1b7b812cbde6ddf718ebfd6939a24f633e52
  */
 BOOL
@@ -3024,19 +3026,119 @@ SetConsoleNlsMode(HANDLE hConsole, DWORD dwMode)
 BOOL
 WINAPI
 DECLSPEC_HOTPATCH
-SetConsoleLocalEUDC(DWORD Unknown1, DWORD Unknown2, DWORD Unknown3, DWORD Unknown4)
+SetConsoleLocalEUDC(
+    _In_ HANDLE hConsoleHandle,
+    _In_ WORD wCodePoint,
+    _In_ COORD cFontSize,
+    _In_ PCHAR lpSB)
 {
     STUB;
     return FALSE;
 }
 
+static BOOL
+IntRegisterConsoleIME(
+    _In_ HWND hWnd,
+    _In_ DWORD dwThreadId,
+    _In_opt_ SIZE_T cbDesktop,
+    _In_opt_ PWSTR pDesktop,
+    _Out_opt_ PDWORD pdwAttachToThreadId)
+{
+    CONSOLE_API_MESSAGE ApiMessage;
+    PCONSOLE_REGISTERCONSOLEIME RegisterConsoleIME = &ApiMessage.Data.RegisterConsoleIME;
+    PCSR_CAPTURE_BUFFER CaptureBuffer;
+
+    if (!cbDesktop || !pDesktop)
+    {
+        pDesktop = NtCurrentPeb()->ProcessParameters->DesktopInfo.Buffer;
+        cbDesktop = NtCurrentPeb()->ProcessParameters->DesktopInfo.Length;
+    }
+
+    cbDesktop = min(cbDesktop, (MAX_PATH + 1) * sizeof(WCHAR));
+
+    RegisterConsoleIME->ConsoleHandle = NtCurrentPeb()->ProcessParameters->ConsoleHandle;
+    RegisterConsoleIME->hWnd = hWnd;
+    RegisterConsoleIME->dwThreadId = dwThreadId;
+    RegisterConsoleIME->cbDesktop = cbDesktop;
+
+    CaptureBuffer = CsrAllocateCaptureBuffer(1, cbDesktop);
+    if (!CaptureBuffer)
+    {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return FALSE;
+    }
+
+    CsrCaptureMessageBuffer(CaptureBuffer,
+                            pDesktop,
+                            cbDesktop,
+                            (PVOID*)&RegisterConsoleIME->pDesktop);
+
+    CsrClientCallServer((PCSR_API_MESSAGE)&ApiMessage,
+                        CaptureBuffer,
+                        CSR_CREATE_API_NUMBER(CONSRV_SERVERDLL_INDEX, ConsolepRegisterConsoleIME),
+                        sizeof(*RegisterConsoleIME));
+
+    CsrFreeCaptureBuffer(CaptureBuffer);
+
+    if (!NT_SUCCESS(ApiMessage.Status))
+    {
+        BaseSetLastNTError(ApiMessage.Status);
+        return FALSE;
+    }
+
+    if (pdwAttachToThreadId)
+    {
+        _SEH2_TRY
+        {
+            *pdwAttachToThreadId = RegisterConsoleIME->dwAttachToThreadId;
+        }
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
+        {
+            BaseSetLastNTError(STATUS_ACCESS_VIOLATION);
+            _SEH2_YIELD(return FALSE);
+        }
+        _SEH2_END;
+    }
+
+    return TRUE;
+}
+
+static BOOL
+IntUnregisterConsoleIME(
+    _In_ DWORD dwThreadId)
+{
+    CONSOLE_API_MESSAGE ApiMessage;
+    PCONSOLE_UNREGISTERCONSOLEIME UnregisterConsoleIME = &ApiMessage.Data.UnregisterConsoleIME;
+
+    UnregisterConsoleIME->ConsoleHandle = NtCurrentPeb()->ProcessParameters->ConsoleHandle;
+    UnregisterConsoleIME->dwThreadId = dwThreadId;
+
+    CsrClientCallServer((PCSR_API_MESSAGE)&ApiMessage,
+                        NULL,
+                        CSR_CREATE_API_NUMBER(CONSRV_SERVERDLL_INDEX, ConsolepUnregisterConsoleIME),
+                        sizeof(*UnregisterConsoleIME));
+    if (!NT_SUCCESS(ApiMessage.Status))
+    {
+        BaseSetLastNTError(ApiMessage.Status);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* This function is called by CONIME.EXE */
 BOOL
 WINAPI
 DECLSPEC_HOTPATCH
-RegisterConsoleIME(HWND hWnd, LPDWORD ThreadId)
+RegisterConsoleIME(
+    _In_ HWND hWnd,
+    _Out_opt_ LPDWORD pdwAttachToThreadId)
 {
-    STUB;
-    return FALSE;
+    return IntRegisterConsoleIME(hWnd,
+                                 GetCurrentThreadId(),
+                                 0,
+                                 NULL,
+                                 pdwAttachToThreadId);
 }
 
 BOOL
@@ -3057,13 +3159,13 @@ SetConsoleOS2OemFormat(BOOL bUnknown)
     return FALSE;
 }
 
+/* This function is called by CONIME.EXE */
 BOOL
 WINAPI
 DECLSPEC_HOTPATCH
 UnregisterConsoleIME(VOID)
 {
-    STUB;
-    return FALSE;
+    return IntUnregisterConsoleIME(GetCurrentThreadId());
 }
 
 /**

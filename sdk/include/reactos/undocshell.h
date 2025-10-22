@@ -1,28 +1,40 @@
 /*
- * Copyright 1999, 2000 Juergen Schmied
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ * PROJECT:     ReactOS Shell
+ * LICENSE:     LGPL-2.1-or-later (https://spdx.org/licenses/LGPL-2.1-or-later)
+ * PURPOSE:     Undocumented shell definitions
+ * COPYRIGHT:   Copyright 1999, 2000 Juergen Schmied
+ *              Copyright 2025 Katayama Hirofumi MZ (katayama.hirofumi.mz@gmail.com)
  */
 
-#ifndef __WINE_UNDOCSHELL_H
-#define __WINE_UNDOCSHELL_H
+#ifndef _UNDOCSHELL_H
+#define _UNDOCSHELL_H
+
+#pragma once
+
+#include <shellapi.h>
+
+#ifndef SHSTDAPI
+#if defined(_SHELL32_) /* DECLSPEC_IMPORT disabled because of CORE-6504: */ || TRUE
+#define SHSTDAPI_(type) type WINAPI
+#else
+#define SHSTDAPI_(type) EXTERN_C DECLSPEC_IMPORT type WINAPI
+#endif
+#define SHSTDAPI SHSTDAPI_(HRESULT)
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
 
+// Because ReactOS installs as Server by default, we ignore OS_SERVERADMINUI
+// in certain places to present a Client/Server hybrid UI.
+
+// Windows defaults to FVM_DETAILS for Administrators on OS_ANYSERVER (instead of FVM_ICON).
+#define ROSPOLICY_DESKTOPFOLDER_DEFLARGEICONS 1
+#define ROSPOLICY_DRIVESFOLDER_DEFLARGEICONS 1
+#define ROSPOLICY_CONTROLSFOLDER_DEFLARGEICONS 1
+
+#define ROSPOLICY_SHELL_NODEFKEYBOARDCUES 1
 
 #if (NTDDI_VERSION < NTDDI_LONGHORN)
 #define DBIMF_NOGRIPPER         0x0800
@@ -49,13 +61,17 @@ typedef struct _TRAYNOTIFYDATAW
 
 #endif /* defined (_SHELLAPI_H) || defined (_INC_SHELLAPI) */
 
-
 /****************************************************************************
  * Taskbar WM_COMMAND identifiers
  */
 #define TWM_DOEXITWINDOWS (WM_USER + 342)
 #define TWM_CYCLEFOCUS (WM_USER + 348)
 
+/****************************************************************************
+ * ProgMan messages
+ */
+#define WM_PROGMAN_OPENSHELLSETTINGS (WM_USER + 22) /* wParam specifies the dialog (and tab page) */
+#define WM_PROGMAN_SAVESTATE         (WM_USER + 77)
 
 /****************************************************************************
  *  IDList Functions
@@ -75,6 +91,15 @@ BOOL WINAPI ILGetDisplayNameEx(
     LPVOID path,
     DWORD type);
 
+#if (NTDDI_VERSION >= NTDDI_LONGHORN) || defined(_SHELL32_)
+SHSTDAPI DisplayNameOfW(
+    _In_ IShellFolder *psf,
+    _In_ LPCITEMIDLIST pidl,
+    _In_ DWORD dwFlags,
+    _Out_ LPWSTR pszBuf,
+    _In_ UINT cchBuf);
+#endif
+
 LPITEMIDLIST WINAPI ILGlobalClone(LPCITEMIDLIST pidl);
 void WINAPI ILGlobalFree(LPITEMIDLIST pidl);
 LPITEMIDLIST WINAPI SHSimpleIDListFromPathA (LPCSTR lpszPath); //FIXME
@@ -90,12 +115,28 @@ HRESULT WINAPI SHILCreateFromPathW (
     LPITEMIDLIST * ppidl,
     DWORD *attributes);
 
+HRESULT WINAPI SHInvokeCommand(
+    HWND hWnd,
+    IShellFolder* lpFolder,
+    LPCITEMIDLIST lpApidl,
+    LPCSTR lpVerb);
+HRESULT WINAPI SHInvokeCommandOnContextMenu(
+    _In_opt_ HWND hWnd,
+    _In_opt_ IUnknown* pUnk,
+    _In_ IContextMenu* pCM,
+    _In_ UINT fCMIC,
+    _In_opt_ LPCSTR pszVerb);
+BOOL WINAPI IContextMenu_Invoke(
+    _In_ IContextMenu *pContextMenu,
+    _In_ HWND hwnd,
+    _In_ LPCSTR lpVerb,
+    _In_ UINT uFlags);
+
 /*
     string functions
 */
 BOOL WINAPI StrRetToStrNA(LPSTR,DWORD,LPSTRRET,const ITEMIDLIST*);
 BOOL WINAPI StrRetToStrNW(LPWSTR,DWORD,LPSTRRET,const ITEMIDLIST*);
-
 
 /****************************************************************************
  * SHChangeNotifyRegister API
@@ -121,6 +162,7 @@ typedef struct _SHCNF_PRINTJOB_INFO
 #define SHCNF_PRINTJOBA 0x0004
 #define SHCNF_PRINTJOBW 0x0007
 
+HRESULT WINAPI SHUpdateRecycleBinIcon(void);
 
 /****************************************************************************
  * Shell Common Dialogs
@@ -184,10 +226,19 @@ int  WINAPI SHOutOfMemoryMessageBox(
     LPCSTR lpCaption,
     UINT uType);
 
+HRESULT WINAPI SHShouldShowWizards(_In_ IUnknown *pUnknown);
+
 DWORD WINAPI SHNetConnectionDialog(
     HWND hwndOwner,
     LPCWSTR lpstrRemoteName,
     DWORD dwType);
+
+BOOL WINAPI SHIsTempDisplayMode(VOID);
+
+HRESULT WINAPI
+SHGetUserDisplayName(
+    _Out_writes_to_(*puSize, *puSize) PWSTR pName,
+    _Inout_ PULONG puSize);
 
 /****************************************************************************
  * Cabinet Window Messages
@@ -237,9 +288,26 @@ HICON WINAPI SHGetFileIcon(
 
 BOOL WINAPI FileIconInit(BOOL bFullInit);
 
+WORD WINAPI
+ExtractIconResInfoA(
+    _In_ HANDLE hHandle,
+    _In_ LPCSTR lpFileName,
+    _In_ WORD wIndex,
+    _Out_ LPWORD lpSize,
+    _Out_ LPHANDLE lpIcon);
+
+WORD WINAPI
+ExtractIconResInfoW(
+    _In_ HANDLE hHandle,
+    _In_ LPCWSTR lpFileName,
+    _In_ WORD wIndex,
+    _Out_ LPWORD lpSize,
+    _Out_ LPHANDLE lpIcon);
+
 /****************************************************************************
  * File Menu Routines
  */
+
 /* FileMenu_Create nSelHeight constants */
 #define FM_DEFAULT_SELHEIGHT  -1
 #define FM_FULL_SELHEIGHT     0
@@ -480,6 +548,11 @@ BOOL WINAPI PathIsSameRootAW(LPCVOID lpszPath1, LPCVOID lpszPath2);
 
 BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID *sOtherDirs);
 
+BOOL WINAPI PathIsEqualOrSubFolder(_In_ LPCWSTR pszFile1OrCSIDL, _In_ LPCWSTR pszFile2);
+
+BOOL WINAPI PathIsTemporaryA(_In_ LPCSTR Str);
+BOOL WINAPI PathIsTemporaryW(_In_ LPCWSTR Str);
+
 /****************************************************************************
  * Shell File Operations error codes - SHFileOperationA/W
  */
@@ -510,50 +583,63 @@ BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID *sOtherDirs);
 #define ERRORONDEST         0x10000
 
 /****************************************************************************
+ * Shell settings
+ */
+
+typedef struct _REGSHELLSTATE
+{
+    DWORD dwSize;
+    SHELLSTATE ss;
+} REGSHELLSTATE, *PREGSHELLSTATE;
+#define REGSHELLSTATE_SIZE 0x24
+#define REGSHELLSTATE_VERSION 0xD
+C_ASSERT(sizeof(REGSHELLSTATE) == REGSHELLSTATE_SIZE);
+
+/****************************************************************************
  * Shell Namespace Routines
  */
 
 /* Generic structure used by several messages */
 typedef struct
 {
-  DWORD          dwReserved;
-  DWORD          dwReserved2;
-  LPCITEMIDLIST  pidl;
-  LPDWORD        lpdwUser;
-} SFVCBINFO, * LPSFVCBINFO;
-typedef const SFVCBINFO * LPCSFVCBINFO;
+    DWORD dwReserved;
+    DWORD dwReserved2;
+    LPCITEMIDLIST pidl;
+    LPDWORD lpdwUser;
+} SFVCBINFO, *LPSFVCBINFO;
+typedef const SFVCBINFO *LPCSFVCBINFO;
 
 /* SFVCB_SELECTIONCHANGED structure */
 typedef struct
 {
-  UINT           uOldState;
-  UINT           uNewState;
-  LPCITEMIDLIST  pidl;
-  LPDWORD        lpdwUser;
-} SFVSELECTSTATE, * LPSFVSELECTSTATE;
-typedef const SFVSELECTSTATE * LPCSFVSELECTSTATE;
+    UINT uOldState;
+    UINT uNewState;
+    LPCITEMIDLIST pidl;
+    LPDWORD lpdwUser;
+} SFVSELECTSTATE, *LPSFVSELECTSTATE;
+typedef const SFVSELECTSTATE *LPCSFVSELECTSTATE;
 
 /* SFVCB_COPYHOOKCALLBACK structure */
 typedef struct
 {
-  HWND    hwnd;
-  UINT    wFunc;
-  UINT    wFlags;
-  LPCSTR  pszSrcFile;
-  DWORD   dwSrcAttribs;
-  LPCSTR  pszDestFile;
-  DWORD   dwDestAttribs;
-} SFVCOPYHOOKINFO, * LPSFVCOPYHOOKINFO;
-typedef const SFVCOPYHOOKINFO * LPCSFVCOPYHOOKINFO;
+    HWND   hwnd;
+    UINT   wFunc;
+    UINT   wFlags;
+    LPCSTR pszSrcFile;
+    DWORD  dwSrcAttribs;
+    LPCSTR pszDestFile;
+    DWORD  dwDestAttribs;
+} SFVCOPYHOOKINFO, *LPSFVCOPYHOOKINFO;
+typedef const SFVCOPYHOOKINFO *LPCSFVCOPYHOOKINFO;
 
 /* SFVCB_GETDETAILSOF structure */
 typedef struct
 {
-  LPCITEMIDLIST  pidl;
-  int            fmt;
-  int            cx;
-  STRRET         lpText;
-} SFVCOLUMNINFO, * LPSFVCOLUMNINFO;
+    LPCITEMIDLIST pidl;
+    int fmt;
+    int cx;
+    STRRET lpText;
+} SFVCOLUMNINFO, *LPSFVCOLUMNINFO;
 
 /****************************************************************************
  * Misc Stuff
@@ -594,6 +680,96 @@ HRESULT WINAPI ShellExecCmdLine(
     LPVOID pUnused,
     DWORD dwSeclFlags);
 
+/*
+ * Undocumented SEE_MASK_* flags for the SHELLEXECUTEINFO::fMask member
+ * used by ShellExecuteEx(). These are absent from the official Windows SDK.
+ * However they are used in shobjidl.idl to define some CMIC_MASK_* flags,
+ * these ones being mentioned in the MSDN documentation of the
+ * CMINVOKECOMMANDINFOEX structure.
+ */
+#define SEE_MASK_UNKNOWN_0x1000 0x00001000 // FIXME: Name
+#define SEE_MASK_NO_HOOKS       0x00002000 // https://www.yisu.com/ask/30968554.html
+#define SEE_MASK_HASLINKNAME    0x00010000
+#define SEE_MASK_FLAG_SEPVDM    0x00020000
+#define SEE_MASK_USE_RESERVED   0x00040000
+#define SEE_MASK_HASTITLE       0x00080000
+#define SEE_MASK_FILEANDURL     0x00400000 // https://textslashplain.com/2019/09/25/web-to-app-communication-directinvoke/
+
+HINSTANCE WINAPI
+RealShellExecuteA(
+    _In_opt_ HWND hwnd,
+    _In_opt_ LPCSTR lpOperation,
+    _In_opt_ LPCSTR lpFile,
+    _In_opt_ LPCSTR lpParameters,
+    _In_opt_ LPCSTR lpDirectory,
+    _In_opt_ LPSTR lpReturn,
+    _In_opt_ LPCSTR lpTitle,
+    _In_opt_ LPVOID lpReserved,
+    _In_ INT nCmdShow,
+    _Out_opt_ PHANDLE lphProcess);
+
+HINSTANCE WINAPI
+RealShellExecuteW(
+    _In_opt_ HWND hwnd,
+    _In_opt_ LPCWSTR lpOperation,
+    _In_opt_ LPCWSTR lpFile,
+    _In_opt_ LPCWSTR lpParameters,
+    _In_opt_ LPCWSTR lpDirectory,
+    _In_opt_ LPWSTR lpReturn,
+    _In_opt_ LPCWSTR lpTitle,
+    _In_opt_ LPVOID lpReserved,
+    _In_ INT nCmdShow,
+    _Out_opt_ PHANDLE lphProcess);
+
+HINSTANCE WINAPI
+RealShellExecuteExA(
+    _In_opt_ HWND hwnd,
+    _In_opt_ LPCSTR lpOperation,
+    _In_opt_ LPCSTR lpFile,
+    _In_opt_ LPCSTR lpParameters,
+    _In_opt_ LPCSTR lpDirectory,
+    _In_opt_ LPSTR lpReturn,
+    _In_opt_ LPCSTR lpTitle,
+    _In_opt_ LPVOID lpReserved,
+    _In_ INT nCmdShow,
+    _Out_opt_ PHANDLE lphProcess,
+    _In_ DWORD dwFlags);
+
+HINSTANCE WINAPI
+RealShellExecuteExW(
+    _In_opt_ HWND hwnd,
+    _In_opt_ LPCWSTR lpOperation,
+    _In_opt_ LPCWSTR lpFile,
+    _In_opt_ LPCWSTR lpParameters,
+    _In_opt_ LPCWSTR lpDirectory,
+    _In_opt_ LPWSTR lpReturn,
+    _In_opt_ LPCWSTR lpTitle,
+    _In_opt_ LPVOID lpReserved,
+    _In_ INT nCmdShow,
+    _Out_opt_ PHANDLE lphProcess,
+    _In_ DWORD dwFlags);
+
+VOID WINAPI
+ShellExec_RunDLL(
+    _In_opt_ HWND hwnd,
+    _In_opt_ HINSTANCE hInstance,
+    _In_ PCSTR pszCmdLine,
+    _In_ INT nCmdShow);
+
+VOID WINAPI
+ShellExec_RunDLLA(
+    _In_opt_ HWND hwnd,
+    _In_opt_ HINSTANCE hInstance,
+    _In_ PCSTR pszCmdLine,
+    _In_ INT nCmdShow);
+
+VOID WINAPI
+ShellExec_RunDLLW(
+    _In_opt_ HWND hwnd,
+    _In_opt_ HINSTANCE hInstance,
+    _In_ PCWSTR pszCmdLine,
+    _In_ INT nCmdShow);
+
 /* RegisterShellHook types */
 #define RSH_DEREGISTER        0
 #define RSH_REGISTER          1
@@ -618,6 +794,13 @@ HRESULT WINAPI SHCreateDefClassObject(
     REFIID riidObject);
 
 void WINAPI SHFreeUnusedLibraries(void);
+
+HRESULT WINAPI SHExtCoCreateInstance(
+    _In_opt_ LPCWSTR aclsid,
+    _In_opt_ const CLSID *clsid,
+    _In_opt_ LPUNKNOWN pUnkOuter,
+    _In_ REFIID refiid,
+    _Out_ LPVOID *ppv);
 
 /* SHCreateLinks flags */
 #define SHCLF_PREFIXNAME       0x01
@@ -644,12 +827,88 @@ BOOL WINAPI SHInitRestricted(LPCVOID unused, LPCVOID inpRegKey);
 #define SMC_EXEC 4
 INT WINAPI Shell_GetCachedImageIndex(LPCWSTR szPath, INT nIndex, UINT bSimulateDoc);
 
+HRESULT WINAPI SHCreatePropertyBag(_In_ REFIID riid, _Out_ void **ppvObj);
+HRESULT WINAPI SHLimitInputCombo(HWND hWnd, IShellFolder *psf);
 HRESULT WINAPI SHGetImageList(int iImageList, REFIID riid, void **ppv);
+
+BOOL WINAPI GUIDFromStringA(
+    _In_   PCSTR psz,
+    _Out_  LPGUID pguid);
 
 BOOL WINAPI GUIDFromStringW(
     _In_   PCWSTR psz,
-    _Out_  LPGUID pguid
-    );
+    _Out_  LPGUID pguid);
+
+PSTR WINAPI
+StrRStrA(
+    _In_ PCSTR pszSrc,
+    _In_opt_ PCSTR pszLast,
+    _In_ PCSTR pszSearch);
+
+PWSTR WINAPI
+StrRStrW(
+    _In_ PCWSTR pszSrc,
+    _In_opt_ PCWSTR pszLast,
+    _In_ PCWSTR pszSearch);
+
+LPSTR WINAPI SheRemoveQuotesA(LPSTR psz);
+LPWSTR WINAPI SheRemoveQuotesW(LPWSTR psz);
+
+/* Flags for Int64ToString and LargeIntegerToString */
+#define FMT_USE_NUMDIGITS 0x01
+#define FMT_USE_LEADZERO  0x02
+#define FMT_USE_GROUPING  0x04
+#define FMT_USE_DECIMAL   0x08
+#define FMT_USE_THOUSAND  0x10
+#define FMT_USE_NEGNUMBER 0x20
+
+INT WINAPI
+Int64ToString(
+    _In_ LONGLONG llValue,
+    _Out_writes_z_(cchOut) LPWSTR pszOut,
+    _In_ UINT cchOut,
+    _In_ BOOL bUseFormat,
+    _In_opt_ const NUMBERFMTW *pNumberFormat,
+    _In_ DWORD dwNumberFlags);
+
+INT WINAPI
+LargeIntegerToString(
+    _In_ const LARGE_INTEGER *pLargeInt,
+    _Out_writes_z_(cchOut) LPWSTR pszOut,
+    _In_ UINT cchOut,
+    _In_ BOOL bUseFormat,
+    _In_opt_ const NUMBERFMTW *pNumberFormat,
+    _In_ DWORD dwNumberFlags);
+
+LPWSTR WINAPI
+ShortSizeFormatW(
+    _In_ DWORD dwNumber,
+    _Out_writes_(0x8FFF) LPWSTR pszBuffer);
+
+BOOL WINAPI SHOpenEffectiveToken(_Out_ LPHANDLE phToken);
+DWORD WINAPI SHGetUserSessionId(_In_opt_ HANDLE hToken);
+
+typedef HRESULT (CALLBACK *PRIVILEGED_FUNCTION)(LPARAM lParam);
+
+HRESULT WINAPI
+SHInvokePrivilegedFunctionW(
+    _In_z_ LPCWSTR pszName,
+    _In_ PRIVILEGED_FUNCTION fn,
+    _In_opt_ LPARAM lParam);
+
+BOOL WINAPI
+SHTestTokenPrivilegeW(_In_opt_ HANDLE hToken, _In_z_ LPCWSTR lpName);
+
+BOOL WINAPI IsSuspendAllowed(VOID);
+
+BOOL WINAPI
+Activate_RunDLL(
+    _In_ HWND hwnd,
+    _In_ HINSTANCE hinst,
+    _In_ LPCWSTR cmdline,
+    _In_ INT cmdshow);
+
+BOOL WINAPI SHSettingsChanged(LPCVOID unused, LPCWSTR pszKey);
 
 /*****************************************************************************
  * Shell32 resources
@@ -715,11 +974,10 @@ BOOL WINAPI GUIDFromStringW(
 #define TABDMC_LOADINPROC 2
 
 void WINAPI ShellDDEInit(BOOL bInit);
-DWORD WINAPI WinList_Init(void);
 
 IStream* WINAPI SHGetViewStream(LPCITEMIDLIST, DWORD, LPCTSTR, LPCTSTR, LPCTSTR);
 
-EXTERN_C HRESULT WINAPI SHCreateSessionKey(REGSAM samDesired, PHKEY phKey);
+HRESULT WINAPI SHCreateSessionKey(REGSAM samDesired, PHKEY phKey);
 
 LONG WINAPI SHRegQueryValueExA(
     HKEY hkey,
@@ -728,6 +986,7 @@ LONG WINAPI SHRegQueryValueExA(
     LPDWORD lpType,
     LPBYTE lpData,
     LPDWORD lpcbData);
+
 LONG WINAPI SHRegQueryValueExW(
     HKEY hkey,
     LPCWSTR pszValue,
@@ -735,11 +994,35 @@ LONG WINAPI SHRegQueryValueExW(
     LPDWORD pdwType,
     LPVOID pvData,
     LPDWORD pcbData);
+
 #ifdef UNICODE
-    #define SHRegQueryValueEx SHRegQueryValueExW
+#define SHRegQueryValueEx SHRegQueryValueExW
 #else
-    #define SHRegQueryValueEx SHRegQueryValueExA
+#define SHRegQueryValueEx SHRegQueryValueExA
 #endif
+
+BOOL WINAPI
+SHIsBadInterfacePtr(
+    _In_ LPCVOID pv,
+    _In_ UINT_PTR ucb);
+
+HRESULT WINAPI
+CopyStreamUI(
+    _In_ IStream *pSrc,
+    _Out_ IStream *pDst,
+    _Inout_opt_ IProgressDialog *pProgress,
+    _In_opt_ DWORDLONG dwlSize);
+
+// Flags for SHGetComputerDisplayNameW
+#define SHGCDN_NOCACHE 0x1
+#define SHGCDN_NOSERVERNAME 0x10000
+
+HRESULT WINAPI
+SHGetComputerDisplayNameW(
+    _In_opt_ LPWSTR pszServerName,
+    _In_ DWORD dwFlags,
+    _Out_writes_z_(cchNameMax) LPWSTR pszName,
+    _In_ DWORD cchNameMax);
 
 /*****************************************************************************
  * INVALID_FILETITLE_CHARACTERS
@@ -978,8 +1261,47 @@ typedef struct SFVM_CUSTOMVIEWINFO_DATA
 
 #include <poppack.h>
 
+#if defined(_WIN64) || defined(BUILD_WOW6432)
+    typedef UINT64 APPBAR_OUTPUT;
+#else
+    typedef HANDLE APPBAR_OUTPUT;
+#endif
+
+/*
+ * Private structures for internal AppBar messaging.
+ * These structures can be sent from 32-bit shell32 to 64-bit Explorer.
+ * See also: https://learn.microsoft.com/en-us/windows/win32/winprog64/interprocess-communication
+ * > ... only the lower 32 bits are significant, so it is safe to truncate the handle
+ * See also: https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle
+ * > DuplicateHandle can be used to duplicate a handle between a 32-bit process and a 64-bit process.
+ */
+#include <pshpack8.h>
+typedef struct tagAPPBARDATAINTEROP
+{
+    DWORD cbSize; /* == sizeof(APPBARDATAINTEROP) */
+    UINT32 hWnd32;
+    UINT uCallbackMessage;
+    UINT uEdge;
+    RECT rc;
+    LONGLONG lParam64;
+} APPBARDATAINTEROP, *PAPPBARDATAINTEROP;
+typedef struct tagAPPBAR_COMMAND
+{
+    APPBARDATAINTEROP abd;
+    DWORD dwMessage;
+    APPBAR_OUTPUT hOutput; /* For shlwapi!SHAllocShared */
+    DWORD dwProcessId;
+} APPBAR_COMMAND, *PAPPBAR_COMMAND;
+#include <poppack.h>
+
+#if defined(_WIN64) || defined(BUILD_WOW6432)
+C_ASSERT(sizeof(APPBAR_COMMAND) == 0x40);
+#else
+C_ASSERT(sizeof(APPBAR_COMMAND) == 0x38);
+#endif
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
 
-#endif /* __WINE_UNDOCSHELL_H */
+#endif /* _UNDOCSHELL_H */

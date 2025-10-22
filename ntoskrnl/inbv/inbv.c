@@ -48,7 +48,7 @@ static INBV_PROGRESS_STATE InbvProgressState;
 static BT_PROGRESS_INDICATOR InbvProgressIndicator = {0, 25, 0};
 
 static ULONG ResourceCount = 0;
-static PUCHAR ResourceList[1 + IDB_MAX_RESOURCE]; // First entry == NULL, followed by 'ResourceCount' entries.
+static PUCHAR ResourceList[1 + IDB_MAX_RESOURCES]; // First entry == NULL, followed by 'ResourceCount' entries.
 
 
 /*
@@ -91,6 +91,8 @@ static ULONG InbvTerminalBkgdColor = 40;
 
 /* FUNCTIONS *****************************************************************/
 
+#define RT_BITMAP   MAKEINTRESOURCE(2)
+
 CODE_SEG("INIT")
 static
 PVOID
@@ -109,8 +111,9 @@ FindBitmapResource(
 
     /* Loop the driver list */
     ListHead = &LoaderBlock->LoadOrderListHead;
-    NextEntry = ListHead->Flink;
-    while (NextEntry != ListHead)
+    for (NextEntry = ListHead->Flink;
+         NextEntry != ListHead;
+         NextEntry = NextEntry->Flink)
     {
         /* Get the entry */
         LdrEntry = CONTAINING_RECORD(NextEntry,
@@ -130,9 +133,10 @@ FindBitmapResource(
     if (NextEntry != ListHead)
     {
         /* Try to find the resource */
-        ResourceInfo.Type = 2; // RT_BITMAP;
+        ResourceInfo.Type = RT_BITMAP;
         ResourceInfo.Name = ResourceId;
-        ResourceInfo.Language = 0;
+        ResourceInfo.Language = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL);
+
         Status = LdrFindResource_U(LdrEntry->DllBase,
                                    &ResourceInfo,
                                    RESOURCE_DATA_LEVEL,

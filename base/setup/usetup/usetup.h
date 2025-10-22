@@ -33,10 +33,11 @@
 
 /* PSDK/NDK */
 #define WIN32_NO_STATUS
+#define _KERNEL32_ // To define WINBASEAPI empty
 #include <windef.h>
 #include <winbase.h>
 #include <winreg.h>
-#include <winuser.h>
+#include <winuser.rh>
 #include <wincon.h>
 
 #define NTOS_MODE_USER
@@ -70,7 +71,6 @@
 
 
 extern HANDLE ProcessHeap;
-extern BOOLEAN IsUnattendedSetup;
 extern PCWSTR SelectedLanguageId;
 
 typedef enum _PAGE_NUMBER
@@ -94,24 +94,23 @@ typedef enum _PAGE_NUMBER
     LAYOUT_SETTINGS_PAGE,
 
     SELECT_PARTITION_PAGE,
-    CREATE_PRIMARY_PARTITION_PAGE,
-    CREATE_EXTENDED_PARTITION_PAGE,
-    CREATE_LOGICAL_PARTITION_PAGE,
+    CREATE_PARTITION_PAGE,
     CHANGE_SYSTEM_PARTITION,
     CONFIRM_DELETE_SYSTEM_PARTITION_PAGE,
     DELETE_PARTITION_PAGE,
 
-    SELECT_FILE_SYSTEM_PAGE,
-    FORMAT_PARTITION_PAGE,
+    START_PARTITION_OPERATIONS_PAGE,    /* Virtual page */
+    SELECT_FILE_SYSTEM_PAGE,    /* Virtual page */
+    FORMAT_PARTITION_PAGE,      /* Virtual page */
     CHECK_FILE_SYSTEM_PAGE,
+    BOOTLOADER_SELECT_PAGE,
 
     PREPARE_COPY_PAGE,
     INSTALL_DIRECTORY_PAGE,
     FILE_COPY_PAGE,
     REGISTRY_PAGE,
-    BOOT_LOADER_PAGE,
-    BOOT_LOADER_FLOPPY_PAGE,
-    BOOT_LOADER_INSTALLATION_PAGE,
+    BOOTLOADER_INSTALL_PAGE,
+    BOOTLOADER_REMOVABLE_DISK_PAGE,
 
     SUCCESS_PAGE,
     QUIT_PAGE,

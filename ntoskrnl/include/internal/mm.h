@@ -109,8 +109,6 @@ typedef ULONG_PTR SWAPENTRY;
 #define PAGE_WRITETHROUGH                   (1024)
 #define PAGE_SYSTEM                         (2048)
 
-#define SEC_PHYSICALMEMORY                  (0x80000000)
-
 #define MC_USER                             (0)
 #define MC_SYSTEM                           (1)
 #define MC_MAXIMUM                          (2)
@@ -130,6 +128,13 @@ typedef ULONG_PTR SWAPENTRY;
 
 #define MM_ROUND_DOWN(x,s)                  \
     ((PVOID)(((ULONG_PTR)(x)) & ~((ULONG_PTR)(s)-1)))
+
+/* PAGE_ROUND_UP and PAGE_ROUND_DOWN equivalent, with support for 64-bit-only data types */
+#define PAGE_ROUND_UP_64(x) \
+    (((x) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
+
+#define PAGE_ROUND_DOWN_64(x) \
+    ((x) & ~(PAGE_SIZE - 1))
 
 #define PAGE_FLAGS_VALID_FOR_SECTION \
     (PAGE_READONLY | \
@@ -252,7 +257,6 @@ typedef struct _MEMORY_AREA
     ULONG Flags;
     BOOLEAN DeleteInProgress;
     ULONG Magic;
-    PVOID Vad;
 
     struct
     {
@@ -261,6 +265,11 @@ typedef struct _MEMORY_AREA
         LIST_ENTRY RegionListHead;
     } SectionData;
 } MEMORY_AREA, *PMEMORY_AREA;
+
+#define MI_SET_MEMORY_AREA_VAD(Vad) do { (Vad)->u.VadFlags.Spare |= 1; } while (0)
+#define MI_IS_MEMORY_AREA_VAD(Vad) (((Vad)->u.VadFlags.Spare & 1) != 0)
+#define MI_SET_ROSMM_VAD(Vad) do { (Vad)->u.VadFlags.Spare |= 2; } while (0)
+#define MI_IS_ROSMM_VAD(Vad) (((Vad)->u.VadFlags.Spare & 2) != 0)
 
 typedef struct _MM_RMAP_ENTRY
 {
@@ -369,6 +378,12 @@ typedef struct _MMPFNENTRY
     USHORT ParityError:1;
 } MMPFNENTRY;
 
+#ifdef _WIN64
+#define MI_PTE_FRAME_BITS 57
+#else
+#define MI_PTE_FRAME_BITS 25
+#endif
+
 // Mm internal
 typedef struct _MMPFN
 {
@@ -402,6 +417,9 @@ typedef struct _MMPFN
             USHORT ShortFlags;
         } e2;
     } u3;
+#ifdef _WIN64
+    ULONG UsedPageTableEntries;
+#endif
     union
     {
         MMPTE OriginalPte;
@@ -415,7 +433,7 @@ typedef struct _MMPFN
         ULONG_PTR EntireFrame;
         struct
         {
-            ULONG_PTR PteFrame:25;
+            ULONG_PTR PteFrame : MI_PTE_FRAME_BITS;
             ULONG_PTR InPageError:1;
             ULONG_PTR VerifierAllocation:1;
             ULONG_PTR AweAllocation:1;
@@ -611,6 +629,13 @@ MmLocateMemoryAreaByRegion(
     SIZE_T Length
 );
 
+BOOLEAN
+NTAPI
+MmIsAddressRangeFree(
+    _In_ PMMSUPPORT AddressSpace,
+    _In_ PVOID Address,
+    _In_ ULONG_PTR Length);
+
 PVOID
 NTAPI
 MmFindGap(
@@ -619,15 +644,6 @@ MmFindGap(
     ULONG_PTR Granularity,
     BOOLEAN TopDown
 );
-
-VOID
-NTAPI
-MiRosCheckMemoryAreas(
-   PMMSUPPORT AddressSpace);
-
-VOID
-NTAPI
-MiCheckAllProcessMemoryAreas(VOID);
 
 /* npool.c *******************************************************************/
 
@@ -684,12 +700,6 @@ MmBuildMdlFromPages(
 );
 
 /* mminit.c ******************************************************************/
-
-VOID
-NTAPI
-MmInit1(
-    VOID
-);
 
 CODE_SEG("INIT")
 BOOLEAN
@@ -797,18 +807,6 @@ MmSetMemoryPriorityProcess(
     IN UCHAR MemoryPriority
 );
 
-/* i386/pfault.c *************************************************************/
-
-NTSTATUS
-NTAPI
-MmPageFault(
-    ULONG Cs,
-    PULONG Eip,
-    PULONG Eax,
-    ULONG Cr2,
-    ULONG ErrorCode
-);
-
 /* special.c *****************************************************************/
 
 VOID
@@ -868,7 +866,7 @@ MmDeleteKernelStack(PVOID Stack,
 
 /* balance.c / pagefile.c******************************************************/
 
-inline VOID UpdateTotalCommittedPages(LONG Delta)
+FORCEINLINE VOID UpdateTotalCommittedPages(LONG Delta)
 {
     /*
      * Add up all the used "Committed" memory + pagefile.
@@ -880,7 +878,7 @@ inline VOID UpdateTotalCommittedPages(LONG Delta)
                                MiMemoryConsumers[MC_USER].PagesUsed +
                                MiUsedSwapPages;
      */
-    
+
     /* Update Commitment */
     SIZE_T TotalCommittedPages = InterlockedExchangeAddSizeT(&MmTotalCommittedPages, Delta) + Delta;
 
@@ -1135,6 +1133,14 @@ MmCreateVirtualMappingUnsafe(
     PFN_NUMBER Page
 );
 
+NTSTATUS
+NTAPI
+MmCreatePhysicalMapping(
+    _Inout_opt_ PEPROCESS Process,
+    _In_ PVOID Address,
+    _In_ ULONG flProtect,
+    _In_ PFN_NUMBER Page);
+
 ULONG
 NTAPI
 MmGetPageProtect(
@@ -1291,9 +1297,18 @@ MmGetExecuteOptions(IN PULONG ExecuteOptions);
 _Success_(return)
 BOOLEAN
 MmDeleteVirtualMapping(
-    _In_opt_ PEPROCESS Process,
+    _Inout_opt_ PEPROCESS Process,
     _In_ PVOID Address,
     _Out_opt_ BOOLEAN* WasDirty,
+    _Out_opt_ PPFN_NUMBER Page
+);
+
+_Success_(return)
+BOOLEAN
+MmDeletePhysicalMapping(
+    _Inout_opt_ PEPROCESS Process,
+    _In_ PVOID Address,
+    _Out_opt_ BOOLEAN * WasDirty,
     _Out_opt_ PPFN_NUMBER Page
 );
 
@@ -1473,29 +1488,28 @@ VOID
 NTAPI
 MmFreeSectionSegments(PFILE_OBJECT FileObject);
 
-/* Exported from NT 6.2 Onward. We keep it internal. */
+/* Exported from NT 6.2 onward. We keep it internal. */
 NTSTATUS
 NTAPI
-MmMapViewInSystemSpaceEx (
+MmMapViewInSystemSpaceEx(
     _In_ PVOID Section,
     _Outptr_result_bytebuffer_ (*ViewSize) PVOID *MappedBase,
     _Inout_ PSIZE_T ViewSize,
     _Inout_ PLARGE_INTEGER SectionOffset,
-    _In_ ULONG_PTR Flags
-    );
+    _In_ ULONG_PTR Flags);
 
 BOOLEAN
 NTAPI
-MmArePagesResident(
-    _In_ PEPROCESS Process,
-    _In_ PVOID BaseAddress,
+MmIsDataSectionResident(
+    _In_ PSECTION_OBJECT_POINTERS SectionObjectPointer,
+    _In_ LONGLONG Offset,
     _In_ ULONG Length);
 
 NTSTATUS
 NTAPI
-MmMakePagesDirty(
-    _In_ PEPROCESS Process,
-    _In_ PVOID Address,
+MmMakeSegmentDirty(
+    _In_ PSECTION_OBJECT_POINTERS SectionObjectPointer,
+    _In_ LONGLONG Offset,
     _In_ ULONG Length);
 
 NTSTATUS
@@ -1626,24 +1640,45 @@ MmUnloadSystemImage(
     IN PVOID ImageHandle
 );
 
+#ifdef CONFIG_SMP
+BOOLEAN
+NTAPI
+MmVerifyImageIsOkForMpUse(
+    _In_ PVOID BaseAddress);
+#endif // CONFIG_SMP
+
 NTSTATUS
 NTAPI
 MmCheckSystemImage(
-    IN HANDLE ImageHandle,
-    IN BOOLEAN PurgeSection
-);
+    _In_ HANDLE ImageHandle);
 
 NTSTATUS
 NTAPI
 MmCallDllInitialize(
-    IN PLDR_DATA_TABLE_ENTRY LdrEntry,
-    IN PLIST_ENTRY ListHead
-);
+    _In_ PLDR_DATA_TABLE_ENTRY LdrEntry,
+    _In_ PLIST_ENTRY ModuleListHead);
 
 VOID
 NTAPI
 MmFreeDriverInitialization(
     IN PLDR_DATA_TABLE_ENTRY LdrEntry);
+
+/* ReactOS-only, used by psmgr.c PspLookupSystemDllEntryPoint() as well */
+NTSTATUS
+NTAPI
+RtlpFindExportedRoutineByName(
+    _In_ PVOID ImageBase,
+    _In_ PCSTR ExportName,
+    _Out_ PVOID* Function,
+    _Out_opt_ PBOOLEAN IsForwarder,
+    _In_ NTSTATUS NotFoundStatus);
+
+/* Exported from NT 10.0 onward. We keep it internal. */
+PVOID
+NTAPI
+RtlFindExportedRoutineByName(
+    _In_ PVOID ImageBase,
+    _In_ PCSTR ExportName);
 
 /* procsup.c *****************************************************************/
 
@@ -1658,6 +1693,12 @@ FORCEINLINE
 VOID
 MmLockAddressSpace(PMMSUPPORT AddressSpace)
 {
+    ASSERT(!PsGetCurrentThread()->OwnsProcessWorkingSetExclusive);
+    ASSERT(!PsGetCurrentThread()->OwnsProcessWorkingSetShared);
+    ASSERT(!PsGetCurrentThread()->OwnsSystemWorkingSetExclusive);
+    ASSERT(!PsGetCurrentThread()->OwnsSystemWorkingSetShared);
+    ASSERT(!PsGetCurrentThread()->OwnsSessionWorkingSetExclusive);
+    ASSERT(!PsGetCurrentThread()->OwnsSessionWorkingSetShared);
     KeAcquireGuardedMutex(&CONTAINING_RECORD(AddressSpace, EPROCESS, Vm)->AddressCreationLock);
 }
 

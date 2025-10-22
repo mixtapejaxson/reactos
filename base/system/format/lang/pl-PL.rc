@@ -1,8 +1,9 @@
 /*
- *    Translated by xrogers
- *    xxrogers@users.sourceforge.net
- *    https://sourceforge.net/projects/reactospl
- *    UTF-8 conversion by Caemyr (May, 2011)
+ * PROJECT:     Disk Format Utility
+ * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
+ * PURPOSE:     Polish resource file
+ * TRANSLATORS: Copyright 2007 Lech Groblewicz <xxrogers@users.sourceforge.net>
+ *              Copyright 2007 Janusz Tomczak <januszt29@interia.pl>
  */
 
 LANGUAGE LANG_POLISH, SUBLANG_DEFAULT
@@ -30,7 +31,7 @@ BEGIN
     STRING_FMIFS_FAIL "Nie można zlokalizować punktów wejściowych FMIFS.\n\n"
     STRING_UNKNOW_ARG "Nieprawidłowy parametr: %s\n"
     STRING_DRIVE_PARM "Brakujący wymagany parametr dysku.\n\n"
-    STRING_ERROR_DRIVE_TYPE "Nie można określić rodzaju dysku"
+    STRING_ERROR_DRIVE_TYPE "Nie można określić rodzaju dysku.\n"
     STRING_INSERT_DISK "Włóż nowy dysk do napędu %C:\ni naciśnij Enter..."
     STRING_NO_VOLUME "Nie można odczytać woluminu"
     STRING_NO_VOLUME_SIZE "Nie można odczytać rozmiaru woluminu"

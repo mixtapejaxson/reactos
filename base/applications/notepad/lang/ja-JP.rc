@@ -85,8 +85,8 @@ BEGIN
     LTEXT "トレイ(&T):", stc3, 16, 42, 36, 8
     COMBOBOX cmb3, 64, 40, 160, 160, CBS_SIMPLE | CBS_DROPDOWN | CBS_SORT | WS_GROUP | WS_TABSTOP | WS_VSCROLL
     GROUPBOX "方向", grp1, 8, 66, 64, 56, BS_GROUPBOX
-    AUTORADIOBUTTON "縦向き(&P)", rad1, 16, 80, 52, 12, BS_AUTORADIOBUTTON
-    AUTORADIOBUTTON "横向き(&L)", rad2, 16, 100, 52, 12, BS_AUTORADIOBUTTON
+    AUTORADIOBUTTON "縦向き(&P)", rad1, 16, 80, 52, 12, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "横向き(&L)", rad2, 16, 100, 52, 12
     GROUPBOX "Borders", grp4, 80, 66, 152, 56, BS_GROUPBOX
     LTEXT "左(&E):", stc15, 88, 82, 30, 8
     EDITTEXT edt4, 119, 80, 36, 12, WS_TABSTOP | WS_GROUP | WS_BORDER
@@ -157,9 +157,9 @@ BEGIN
     STRING_NOTEXT "何も入力されていません。\
 \n何か入力してから実行して下さい。"
     STRING_DOESNOTEXIST "ファイル '%s'\nは存在しません\n\n\
-新しいファイルを作成しますか ?"
+新しいファイルを作成しますか?"
     STRING_NOTSAVED "ファイル '%s'\nは変更されています\n\n\
-変更を保存しますか ?"
+変更を保存しますか?"
     STRING_NOTFOUND "'%s' は見つかりませんでした"
     STRING_OUT_OF_MEMORY "この操作を実行するためのメモリが\
 足りません。\nメモリの空きを増やすためにいくつかのアプリケーションを\n終了して\
@@ -184,5 +184,5 @@ BEGIN
     STRING_PRINTFAILED "印刷が失敗しました。"
 
     STRING_TEXT_DOCUMENT "テキスト文書"
-    STRING_NOTEPAD_AUTHORS "Copyright 1997,98 Marcel Baur, 2000 Mike McCormack, 2002 Sylvain Petreolle, 2002 Andriy Palamarchuk, 2020-23 katahiromz\r\n"
+    STRING_NOTEPAD_AUTHORS "Copyright 1997,98 Marcel Baur, 2000 Mike McCormack, 2002 Sylvain Petreolle, 2002 Andriy Palamarchuk\r\n"
 END

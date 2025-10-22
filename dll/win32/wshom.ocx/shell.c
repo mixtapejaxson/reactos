@@ -18,6 +18,7 @@
 
 #ifdef __REACTOS__
 #include <wchar.h>
+#define STATUS_PENDING ((DWORD)0x00000103)
 #endif
 
 #include "wshom_private.h"
@@ -1261,6 +1262,15 @@ static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style,
         return E_POINTER;
 
     VariantInit(&s);
+#ifdef __REACTOS__
+    if (is_optional_argument(style))
+    {
+        V_VT(&s) = VT_I4;
+        V_I4(&s) = SW_SHOW;
+        hr = S_OK;
+    }
+    else
+#endif
     hr = VariantChangeType(&s, style, 0, VT_I4);
     if (FAILED(hr))
     {

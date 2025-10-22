@@ -3,7 +3,7 @@ LANGUAGE LANG_PORTUGUESE, SUBLANG_NEUTRAL
 IDD_STATUS DIALOGEX 0, 0, 275, 78
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP
 CAPTION "Por favor aguarde..."
-FONT 8, "MS Shell Dlg", 400, 0, 1
+FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL IDI_ROSLOGO, IDC_ROSLOGO, "Static", SS_BITMAP, 0, 0, 275, 54
     CONTROL "", IDC_BAR, "Static", SS_OWNERDRAW, 0, 44, 275, 4
@@ -13,7 +13,7 @@ END
 IDD_WELCOME DIALOGEX 0, 0, 275, 78
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP
 CAPTION "Bem-vindo ao ReactOS"
-FONT 8, "MS Shell Dlg", 400, 0, 1
+FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL IDI_ROSLOGO, IDC_ROSLOGO, "Static", SS_BITMAP, 0, 0, 275, 54
     CONTROL IDI_BAR, IDC_BAR, "Static", SS_BITMAP, 0, 44, 275, 4
@@ -24,7 +24,7 @@ END
 IDD_LOGON DIALOGEX 0, 0, 275, 147
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP
 CAPTION "Início de sessão"
-FONT 8, "MS Shell Dlg", 400, 0, 1
+FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL IDI_ROSLOGO, IDC_ROSLOGO, "Static", SS_BITMAP, 0, 0, 275, 54
     CONTROL IDI_BAR, IDC_BAR, "Static", SS_BITMAP, 0, 44, 275, 4
@@ -34,7 +34,7 @@ BEGIN
     EDITTEXT IDC_LOGON_PASSWORD, 60, 76, 155, 14, ES_AUTOHSCROLL | ES_PASSWORD
     LTEXT "Início de sessão para:", IDC_STATIC, 6, 96, 52, 8
     COMBOBOX IDC_LOGON_DOMAIN, 60, 95, 155, 14, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON "OK",IDOK, 106, 122, 50, 14, BS_DEFPUSHBUTTON
+    DEFPUSHBUTTON "OK", IDOK, 106, 122, 50, 14
     PUSHBUTTON "Cancelar", IDCANCEL, 160, 122, 50, 14
     PUSHBUTTON "&Desligar", IDC_LOGON_SHUTDOWN, 214, 122, 50, 14
 END
@@ -42,14 +42,14 @@ END
 IDD_SECURITY DIALOGEX 0, 0, 275, 164
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP
 CAPTION "Segurança"
-FONT 8, "MS Shell Dlg", 400, 0, 1
+FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL IDI_ROSLOGO, IDC_ROSLOGO, "Static", SS_BITMAP, 0, 0, 275, 54
     GROUPBOX "Informação de início de sessão", IDC_STATIC, 7, 50, 261, 52
     LTEXT "<Mensagem>", IDC_SECURITY_MESSAGE, 15, 62, 245, 18
     LTEXT "<Data de início de sessão>", IDC_SECURITY_LOGONDATE, 15, 83, 245, 8
     CTEXT "Que deseja fazer?", IDC_STATIC, 10, 108, 255, 8
-    PUSHBUTTON "&Bloquear o computador", IDC_SECURITY_LOCK, 7, 124, 80, 14
+    DEFPUSHBUTTON "&Bloquear o computador", IDC_SECURITY_LOCK, 7, 124, 80, 14
     PUSHBUTTON "&Terminar sessão...", IDC_SECURITY_LOGOFF, 98, 124, 80, 14
     PUSHBUTTON "&Desligar...", IDC_SECURITY_SHUTDOWN, 188, 124, 80, 14
     PUSHBUTTON "&Alterar Palavra-passe...", IDC_SECURITY_CHANGEPWD, 7, 143, 80, 14
@@ -60,7 +60,7 @@ END
 IDD_LOCKED DIALOGEX 0, 0, 275, 121
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP
 CAPTION "Computador bloqueado"
-FONT 8, "MS Shell Dlg", 400, 0, 1
+FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL IDI_ROSLOGO, IDC_ROSLOGO, "Static", SS_BITMAP, 0, 0, 275, 54
     ICON IDI_LOCKICON, IDC_STATIC, 7, 59, 20, 20
@@ -72,7 +72,7 @@ END
 IDD_UNLOCK DIALOGEX 0, 0, 275, 179
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP
 CAPTION "Desbloquear o computador"
-FONT 8, "MS Shell Dlg", 400, 0, 1
+FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL IDI_ROSLOGO, IDC_ROSLOGO, "Static", SS_BITMAP, 0, 0, 275, 54
     ICON IDI_LOCKICON, IDC_STATIC, 7, 59, 20, 20
@@ -82,39 +82,39 @@ BEGIN
     EDITTEXT IDC_UNLOCK_USERNAME, 84, 104, 119, 14, ES_AUTOHSCROLL
     LTEXT "Palavra-passe:", IDC_STATIC, 36, 125, 42, 8
     EDITTEXT IDC_UNLOCK_PASSWORD, 84, 123, 119, 14, ES_AUTOHSCROLL | ES_PASSWORD
-    PUSHBUTTON "OK", IDOK, 80, 154, 50, 14, BS_DEFPUSHBUTTON
+    DEFPUSHBUTTON "OK", IDOK, 80, 154, 50, 14
     PUSHBUTTON "Cancelar", IDCANCEL, 144, 154, 50, 14
 END
 
 IDD_CHANGEPWD DIALOGEX 0, 0, 275, 166
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_POPUP
-CAPTION "Alterar Password"
-FONT 8, "MS Shell Dlg", 400, 0, 1
+CAPTION "Alterar palavra-passe"
+FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL IDI_ROSLOGO, IDC_ROSLOGO, "Static", SS_BITMAP, 0, 0, 275, 54
     LTEXT "Nome de utilizador:", IDC_STATIC, 7, 61, 78, 8
     EDITTEXT IDC_CHANGEPWD_USERNAME, 90, 59, 127, 12, ES_AUTOHSCROLL
     LTEXT "Início de sessão para:", IDC_STATIC, 7, 78, 78, 8
     COMBOBOX IDC_CHANGEPWD_DOMAIN, 90, 75, 127, 144, CBS_DROPDOWNLIST | CBS_SORT | WS_TABSTOP
-    LTEXT "Password antiga:", IDC_STATIC, 7, 95, 78, 8
+    LTEXT "Palavra-passe antiga:", IDC_STATIC, 7, 95, 78, 8
     EDITTEXT IDC_CHANGEPWD_OLDPWD, 90, 92, 127, 12, ES_AUTOHSCROLL | ES_PASSWORD
-    LTEXT "Nova Password:", IDC_STATIC, 7, 111, 78, 8
+    LTEXT "Nova palavra-passe:", IDC_STATIC, 7, 111, 78, 8
     EDITTEXT IDC_CHANGEPWD_NEWPWD1, 90, 109, 127, 12, ES_AUTOHSCROLL | ES_PASSWORD
-    LTEXT "Confirme a nova Password:", IDC_STATIC, 7, 127, 78, 8
+    LTEXT "Confirmar palavra-passe:", IDC_STATIC, 7, 127, 83, 8
     EDITTEXT IDC_CHANGEPWD_NEWPWD2, 90, 125, 127, 12, ES_AUTOHSCROLL | ES_PASSWORD
-    PUSHBUTTON "OK", IDOK, 164, 145, 50, 14, BS_DEFPUSHBUTTON
+    DEFPUSHBUTTON "OK", IDOK, 164, 145, 50, 14
     PUSHBUTTON "Cancelar", IDCANCEL, 218, 145, 50, 14
 END
 
 IDD_LOGOFF DIALOGEX 0, 0, 188, 60
 STYLE NOT WS_VISIBLE | DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_BORDER | WS_CAPTION | WS_DLGFRAME | WS_SYSMENU | WS_POPUP
 CAPTION "Terminar sessão no ReactOS"
-FONT 8, "MS Shell Dlg", 400, 0, 1
+FONT 8, "MS Shell Dlg"
 BEGIN
     ICON IDI_LOGOFF, IDC_STATIC, 7, 7, 20, 20
     LTEXT "Deseja terminar a sessão?", IDC_STATIC, 35, 16, 146, 8
-    PUSHBUTTON "Sim", IDYES, 41, 39, 50, 14, BS_DEFPUSHBUTTON
-    PUSHBUTTON "Não", IDNO, 95, 39, 50, 14
+    DEFPUSHBUTTON "&Sim", IDOK, 41, 39, 50, 14
+    PUSHBUTTON "&Não", IDCANCEL, 95, 39, 50, 14
 END
 
 IDD_SHUTDOWN DIALOGEX 0, 0, 275, 146
@@ -214,13 +214,13 @@ BEGIN
     IDS_LOCKEDSAS "O computador está actualmente bloqueado."
     IDS_PRESSCTRLALTDELETE "Pressione Control+Alt+Delete para iniciar sessão."
     IDS_ASKFORUSER "Nome de utilizador: "
-    IDS_ASKFORPASSWORD "Palavra-chave: "
+    IDS_ASKFORPASSWORD "Palavra-passe: "
     IDS_FORCELOGOFF "Isso terminará a sessão do utilizador actual e perderá todos os dados não guardados. Deseja continuar?"
     IDS_LOCKMSG "Só %s ou um Administrador pode desbloquear este computador."
     IDS_LOGONMSG "Tem sessão iniciada como %s."
     IDS_LOGONDATE "Data de inicio de sessão: %s %s"
     IDS_COMPUTERLOCKED "Computador bloqueado."
-    IDS_LOCKEDWRONGPASSWORD "Palavra-chave inválida. Por favor insira a palavra-chave correcta. Verifique as letras maiúsculas e minúsculas."
+    IDS_LOCKEDWRONGPASSWORD "Palavra-passe inválida. Por favor insira a palavra-passe correcta. Verifique as letras maiúsculas e minúsculas."
     IDS_LOCKEDWRONGUSER "Este computador está bloqueado. Sómente %s\\%s ou um Administrador pode desbloquear este computador."
     IDS_CHANGEPWDTITLE "Alterar Palavra-passe"
     IDS_NONMATCHINGPASSWORDS "As palavras-passe não coincidem. Digite a mesma palavra-passe nas duas caixas de texto."
@@ -228,13 +228,17 @@ BEGIN
     IDS_LOGONTITLE "Mensagem de início de sessão"
     IDS_LOGONWRONGUSERORPWD "O sistema não pôde iniciar sessão. Verifique se o seu nome de utilizador e domínio estão correctos e digite a palavra-passe novamente. Verifique as letras maiúsculas e minúsculas usando o caso correcto."
     IDS_LOGONUSERDISABLED "A sua conta foi desactivada. Por favor, consulte o administrador do sistema."
-    IDS_PASSWORDMUSTCHANGE "É obrigado a alterar a palavra-passe no primeiro início de sessão."
+    IDS_PASSWORDMUSTCHANGE "É obrigatório alterar a palavra-passe no primeiro início de sessão."
     IDS_PASSWORDEXPIRED "A sua palavra-passe expirou. Por favor actualize."
     IDS_ACCOUNTEXPIRED "A sua conta expirou. Por favor, consulte o administrador do sistema."
     IDS_ACCOUNTLOCKED "Não é possível iniciar sessão porque sua conta foi bloqueada. Por favor, consulte o administrador do sistema."
     IDS_INVALIDLOGONHOURS "A sua conta tem restrições de horário que impedem o início de sessão no momento. Por favor, tente novamente mais tarde."
     IDS_INVALIDWORKSTATION "A sua conta está configurada para impedir que use este computador. Por favor, tente outro computador."
     IDS_ACCOUNTRESTRICTION "Não é possível iniciar sessão devido a uma restrição de conta."
+    IDS_EMERGENCYLOGOFFTITLE "Encerrar sessão no ReactOS"
+    IDS_EMERGENCYLOGOFF "Clique em OK para encerrar a sessão imediatamente. Quaisquer dados não guardados serão perdidos. Utilize isto apenas como último recurso."
+    IDS_EMERGENCYRESTARTTITLE "Reinício de emergência"
+    IDS_EMERGENCYRESTART "Clique em OK para reiniciar imediatamente. Quaisquer dados não guardados serão perdidos. Utilize isto apenas como último recurso."
 END
 
 /* Shutdown Dialog Strings */
@@ -247,7 +251,7 @@ BEGIN
     IDS_SHUTDOWN_HIBERNATE "Hibernar"
     /* Shut down descriptions */
     IDS_SHUTDOWN_LOGOFF_DESC "Termina a sessão actual e permite que outros utilizadores iniciem sessão no sistema."
-    IDS_SHUTDOWN_SHUTDOWN_DESC "Termina a sessão actual e desliga o sistema para que possa desligar a energia em segurança."
+    IDS_SHUTDOWN_SHUTDOWN_DESC "Termina a sessão actual e encerra o sistema para que possa desligar a energia em segurança."
     IDS_SHUTDOWN_RESTART_DESC "Termina a sessão actual e reinicia o sistema."
     IDS_SHUTDOWN_SLEEP_DESC "Coloca o sistema no modo de suspensão."
     IDS_SHUTDOWN_HIBERNATE_DESC "Guarda a sessão actual e desliga o computador."

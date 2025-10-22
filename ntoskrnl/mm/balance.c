@@ -1,11 +1,9 @@
 /*
- * COPYRIGHT:       See COPYING in the top level directory
- * PROJECT:         ReactOS kernel
- * FILE:            ntoskrnl/mm/balance.c
- * PURPOSE:         kernel memory managment functions
- *
- * PROGRAMMERS:     David Welch (welch@cwcom.net)
- *                  Cameron Gutman (cameron.gutman@reactos.org)
+ * COPYRIGHT:   See COPYING in the top level directory
+ * PROJECT:     ReactOS kernel
+ * PURPOSE:     kernel memory management functions
+ * PROGRAMMERS: David Welch <welch@cwcom.net>
+ *              Cameron Gutman <cameron.gutman@reactos.org>
  */
 
 /* INCLUDES *****************************************************************/
@@ -33,6 +31,7 @@ static ULONG MiMinimumPagesPerRun;
 static CLIENT_ID MiBalancerThreadId;
 static HANDLE MiBalancerThreadHandle = NULL;
 static KEVENT MiBalancerEvent;
+static KEVENT MiBalancerDoneEvent;
 static KTIMER MiBalancerTimer;
 
 static LONG PageOutThreadActive;
@@ -138,14 +137,15 @@ MiTrimMemoryConsumer(ULONG Consumer, ULONG InitialTarget)
 NTSTATUS
 MmTrimUserMemory(ULONG Target, ULONG Priority, PULONG NrFreedPages)
 {
-    PFN_NUMBER CurrentPage;
+    PFN_NUMBER FirstPage, CurrentPage;
     NTSTATUS Status;
 
     (*NrFreedPages) = 0;
 
-    DPRINT1("MM BALANCER: %s\n", Priority ? "Paging out!" : "Removing access bit!");
+    DPRINT("MM BALANCER: %s\n", Priority ? "Paging out!" : "Removing access bit!");
 
-    CurrentPage = MmGetLRUFirstUserPage();
+    FirstPage = MmGetLRUFirstUserPage();
+    CurrentPage = FirstPage;
     while (CurrentPage != 0 && Target > 0)
     {
         if (Priority)
@@ -156,6 +156,10 @@ MmTrimUserMemory(ULONG Target, ULONG Priority, PULONG NrFreedPages)
                 DPRINT("Succeeded\n");
                 Target--;
                 (*NrFreedPages)++;
+                if (CurrentPage == FirstPage)
+                {
+                    FirstPage = 0;
+                }
             }
         }
         else
@@ -245,8 +249,14 @@ MmTrimUserMemory(ULONG Target, ULONG Priority, PULONG NrFreedPages)
                 /* Nobody accessed this page since the last time we check. Time to clean up */
 
                 Status = MmPageOutPhysicalAddress(CurrentPage);
+                if (NT_SUCCESS(Status))
+                {
+                    if (CurrentPage == FirstPage)
+                    {
+                        FirstPage = 0;
+                    }
+                }
                 // DPRINT1("Paged-out one page: %s\n", NT_SUCCESS(Status) ? "Yes" : "No");
-                (void)Status;
             }
 
             /* Done for this page. */
@@ -254,6 +264,15 @@ MmTrimUserMemory(ULONG Target, ULONG Priority, PULONG NrFreedPages)
         }
 
         CurrentPage = MmGetLRUNextUserPage(CurrentPage, TRUE);
+        if (FirstPage == 0)
+        {
+            FirstPage = CurrentPage;
+        }
+        else if (CurrentPage == FirstPage)
+        {
+            DPRINT1("We are back at the start, abort!\n");
+            return STATUS_SUCCESS;
+        }
     }
 
     if (CurrentPage)
@@ -270,10 +289,23 @@ VOID
 NTAPI
 MmRebalanceMemoryConsumers(VOID)
 {
-    // if (InterlockedCompareExchange(&PageOutThreadActive, 0, 1) == 0)
+    if (InterlockedCompareExchange(&PageOutThreadActive, 1, 0) == 0)
     {
         KeSetEvent(&MiBalancerEvent, IO_NO_INCREMENT, FALSE);
     }
+}
+
+VOID
+NTAPI
+MmRebalanceMemoryConsumersAndWait(VOID)
+{
+    ASSERT(PsGetCurrentProcess()->AddressCreationLock.Owner != KeGetCurrentThread());
+    ASSERT(!MM_ANY_WS_LOCK_HELD(PsGetCurrentThread()));
+    ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+
+    KeResetEvent(&MiBalancerDoneEvent);
+    MmRebalanceMemoryConsumers();
+    KeWaitForSingleObject(&MiBalancerDoneEvent, Executive, KernelMode, FALSE, NULL);
 }
 
 NTSTATUS
@@ -283,9 +315,16 @@ MmRequestPageMemoryConsumer(ULONG Consumer, BOOLEAN CanWait,
 {
     PFN_NUMBER Page;
 
-    /* Update the target */
-    InterlockedIncrementUL(&MiMemoryConsumers[Consumer].PagesUsed);
-    UpdateTotalCommittedPages(1);
+    /* Delay some requests for the Memory Manager to recover pages (CORE-17624).
+     * FIXME: This is suboptimal.
+     */
+    static INT i = 0;
+    static LARGE_INTEGER TinyTime = {{-1L, -1L}};
+    if (i++ >= 100)
+    {
+        KeDelayExecutionThread(KernelMode, FALSE, &TinyTime);
+        i = 0;
+    }
 
     /*
      * Actually allocate the page.
@@ -293,27 +332,37 @@ MmRequestPageMemoryConsumer(ULONG Consumer, BOOLEAN CanWait,
     Page = MmAllocPage(Consumer);
     if (Page == 0)
     {
-        KeBugCheck(NO_PAGES_AVAILABLE);
+        *AllocatedPage = 0;
+        return STATUS_NO_MEMORY;
     }
     *AllocatedPage = Page;
+
+    /* Update the target */
+    InterlockedIncrementUL(&MiMemoryConsumers[Consumer].PagesUsed);
+    UpdateTotalCommittedPages(1);
 
     return(STATUS_SUCCESS);
 }
 
+VOID
+CcRosTrimCache(
+    _In_ ULONG Target,
+    _Out_ PULONG NrFreed);
 
-VOID NTAPI
+VOID
+NTAPI
 MiBalancerThread(PVOID Unused)
 {
     PVOID WaitObjects[2];
     NTSTATUS Status;
-    ULONG i;
 
     WaitObjects[0] = &MiBalancerEvent;
     WaitObjects[1] = &MiBalancerTimer;
 
-    while (1)
+    while (TRUE)
     {
-        Status = KeWaitForMultipleObjects(2,
+        KeSetEvent(&MiBalancerDoneEvent, IO_NO_INCREMENT, FALSE);
+        Status = KeWaitForMultipleObjects(_countof(WaitObjects),
                                           WaitObjects,
                                           WaitAny,
                                           Executive,
@@ -325,20 +374,30 @@ MiBalancerThread(PVOID Unused)
         if (Status == STATUS_WAIT_0 || Status == STATUS_WAIT_1)
         {
             ULONG InitialTarget = 0;
+            ULONG Target;
+            ULONG NrFreedPages;
 
             do
             {
                 ULONG OldTarget = InitialTarget;
 
                 /* Trim each consumer */
-                for (i = 0; i < MC_MAXIMUM; i++)
+                for (ULONG i = 0; i < MC_MAXIMUM; i++)
                 {
                     InitialTarget = MiTrimMemoryConsumer(i, InitialTarget);
                 }
 
+                /* Trim cache */
+                Target = max(InitialTarget, abs(MiMinimumAvailablePages - MmAvailablePages));
+                if (Target)
+                {
+                    CcRosTrimCache(Target, &NrFreedPages);
+                    InitialTarget -= min(NrFreedPages, InitialTarget);
+                }
+
                 /* No pages left to swap! */
                 if (InitialTarget != 0 &&
-                        InitialTarget == OldTarget)
+                    InitialTarget == OldTarget)
                 {
                     /* Game over */
                     KeBugCheck(NO_PAGES_AVAILABLE);
@@ -347,7 +406,11 @@ MiBalancerThread(PVOID Unused)
             while (InitialTarget != 0);
 
             if (Status == STATUS_WAIT_0)
-                InterlockedDecrement(&PageOutThreadActive);
+            {
+                LONG Active = InterlockedExchange(&PageOutThreadActive, 0);
+                ASSERT(Active == 1);
+                DBG_UNREFERENCED_LOCAL_VARIABLE(Active);
+            }
         }
         else
         {
@@ -367,6 +430,7 @@ MiInitBalancerThread(VOID)
     LARGE_INTEGER Timeout;
 
     KeInitializeEvent(&MiBalancerEvent, SynchronizationEvent, FALSE);
+    KeInitializeEvent(&MiBalancerDoneEvent, SynchronizationEvent, FALSE);
     KeInitializeTimerEx(&MiBalancerTimer, SynchronizationTimer);
 
     Timeout.QuadPart = -20000000; /* 2 sec */

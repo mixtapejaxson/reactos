@@ -25,7 +25,7 @@ BEGIN
     POPUP "&Bestand"
     BEGIN
         MENUITEM "&Nieuw\tCtrl+N", CMD_NEW
-        MENUITEM "New &Window\tCtrl+Shift+N", CMD_NEW_WINDOW
+        MENUITEM "Nieuw &venster\tCtrl+Shift+N", CMD_NEW_WINDOW
         MENUITEM "&Openen\tCtrl+O", CMD_OPEN
         MENUITEM "O&pslaan\tCtrl+S", CMD_SAVE
         MENUITEM "Ops&laan als...", CMD_SAVE_AS
@@ -46,8 +46,8 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "&Zoeken\tCtrl+Z", CMD_SEARCH
         MENUITEM "&Volgende zoeken\tF3", CMD_SEARCH_NEXT
-        MENUITEM "Replace...\tCtrl+H", CMD_REPLACE
-        MENUITEM "Go To...\tCtrl+G", CMD_GOTO
+        MENUITEM "Vervangen...\tCtrl+H", CMD_REPLACE
+        MENUITEM "Ga naar...\tCtrl+G", CMD_GOTO
         MENUITEM SEPARATOR
         MENUITEM "&Alles selecteren\tCtrl+A", CMD_SELECT_ALL
         MENUITEM "Tijd/&datum\tF5", CMD_TIME_DATE
@@ -65,7 +65,7 @@ BEGIN
     BEGIN
         MENUITEM "&Help-onderwerpen", CMD_HELP_CONTENTS
         MENUITEM SEPARATOR
-        MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
+        MENUITEM "&Over Notepad", CMD_HELP_ABOUT_NOTEPAD
     END
 END
 
@@ -85,8 +85,8 @@ BEGIN
     LTEXT "&Tray:", stc3, 16, 42, 36, 8
     COMBOBOX cmb3, 64, 40, 160, 160, CBS_SIMPLE | CBS_DROPDOWN | CBS_SORT | WS_GROUP | WS_TABSTOP | WS_VSCROLL
     GROUPBOX "Orientation", grp1, 8, 66, 64, 56, BS_GROUPBOX
-    AUTORADIOBUTTON "&Portrait", rad1, 16, 80, 52, 12, BS_AUTORADIOBUTTON
-    AUTORADIOBUTTON "&Landscape", rad2, 16, 100, 52, 12, BS_AUTORADIOBUTTON
+    AUTORADIOBUTTON "&Portrait", rad1, 16, 80, 52, 12, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "&Landscape", rad2, 16, 100, 52, 12
     GROUPBOX "Borders", grp4, 80, 66, 152, 56, BS_GROUPBOX
     LTEXT "L&eft:", stc15, 88, 82, 30, 8
     EDITTEXT edt4, 119, 80, 36, 12, WS_TABSTOP | WS_GROUP | WS_BORDER
@@ -122,12 +122,12 @@ END
 DIALOG_GOTO DIALOGEX 0, 0, 165, 50
 STYLE DS_SHELLFONT | DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 FONT 8, "MS Shell Dlg"
-CAPTION "Goto line"
+CAPTION "Ga naar regel"
 BEGIN
-    LTEXT "Line number:", 0x155, 5, 12, 41, 12
+    LTEXT "Lijn nummer:", 0x155, 5, 12, 41, 12
     EDITTEXT ID_LINENUMBER, 54, 10, 106, 12, ES_NUMBER
     DEFPUSHBUTTON "OK", IDOK, 75, 30, 40, 15
-    PUSHBUTTON "Cancel", IDCANCEL, 120, 30, 40, 15
+    PUSHBUTTON "Annuleer", IDCANCEL, 120, 30, 40, 15
 END
 
 DIALOG_PRINTING DIALOG 0, 0, 160, 100
@@ -138,7 +138,7 @@ BEGIN
     CTEXT "Print job is starting...", IDC_PRINTING_STATUS, 5, 10, 150, 15
     CTEXT "(Filename)", IDC_PRINTING_FILENAME, 5, 35, 150, 15
     CTEXT "Pagina %u", IDC_PRINTING_PAGE, 5, 55, 150, 15
-    PUSHBUTTON "Cancel", IDCANCEL, 50, 75, 60, 20
+    PUSHBUTTON "Annuleer", IDCANCEL, 50, 75, 60, 20
 END
 
 STRINGTABLE
@@ -154,14 +154,14 @@ BEGIN
     STRING_TEXT_FILES_TXT "Tekstbestanden (*.txt)"
     STRING_TOOLARGE "Het bestand '%s' is te groot voor Kladblok.\n\
 Gebruik een andere editor."
-    STRING_NOTEXT "U heeft geen tekst ingevoerd. \
+    STRING_NOTEXT "U heeft geen tekst ingevoerd.\
 \nType uw tekst en probeer het nogmaals"
     STRING_DOESNOTEXIST "Het bestand '%s'\nbestaat niet\n\n\
 Wilt u een nieuw bestand maken?"
     STRING_NOTSAVED "Het bestand '%s'\nis gewijzigd\n\n\
 Wilt u de wijzigingen opslaan?"
     STRING_NOTFOUND "'%s' kan niet worden gevonden."
-    STRING_OUT_OF_MEMORY "Onvoldoende geheugen. \
+    STRING_OUT_OF_MEMORY "Onvoldoende geheugen.\
 \nSluit een of meer applicaties om de hoeveelheid\nbeschikbaar geheugen te vergroten."
     STRING_CANNOTFIND "Cannot find '%s'"
     STRING_ANSI "ANSI"
@@ -180,8 +180,8 @@ Wilt u de wijzigingen opslaan?"
     STRING_PRINTCANCELING "The print job is being canceled..."
     STRING_PRINTCOMPLETE "Printing is successfully done."
     STRING_PRINTCANCELED "Printing has been canceled."
-    STRING_PRINTFAILED "Printing is failed."
+    STRING_PRINTFAILED "Printing failed."
 
     STRING_TEXT_DOCUMENT "Text Document"
-    STRING_NOTEPAD_AUTHORS "Copyright 1997,98 Marcel Baur, 2000 Mike McCormack, 2002 Sylvain Petreolle, 2002 Andriy Palamarchuk, 2020-23 katahiromz\r\n"
+    STRING_NOTEPAD_AUTHORS "Copyright 1997,98 Marcel Baur, 2000 Mike McCormack, 2002 Sylvain Petreolle, 2002 Andriy Palamarchuk\r\n"
 END

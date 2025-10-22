@@ -33,6 +33,8 @@ CNewMenu::CNewMenu() :
     m_idCmdFirst(0),
     m_idCmdFolder(-1),
     m_idCmdLink(-1),
+    m_bCustomIconFolder(FALSE),
+    m_bCustomIconLink(FALSE),
     m_hIconFolder(NULL),
     m_hIconLink(NULL)
 {
@@ -42,6 +44,10 @@ CNewMenu::~CNewMenu()
 {
     UnloadAllItems();
 
+    if (m_bCustomIconFolder && m_hIconFolder)
+        DestroyIcon(m_hIconFolder);
+    if (m_bCustomIconLink && m_hIconLink)
+        DestroyIcon(m_hIconLink);
     if (m_pidlFolder)
         ILFree(m_pidlFolder);
 }
@@ -188,7 +194,7 @@ CNewMenu::CacheItems()
         if (pNewItem)
         {
             dwSize += wcslen(wszName) + 1;
-            if (!m_pLinkItem && wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
+            if (!m_pLinkItem && _wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
             {
                 /* The unique link handler */
                 m_pLinkItem = pNewItem;
@@ -271,7 +277,7 @@ CNewMenu::LoadCachedItems()
         pNewItem = LoadItem(wszName);
         if (pNewItem)
         {
-            if (!m_pLinkItem && wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
+            if (!m_pLinkItem && _wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
             {
                 /* The unique link handler */
                 m_pLinkItem = pNewItem;
@@ -424,7 +430,7 @@ HRESULT CNewMenu::SelectNewItem(LONG wEventId, UINT uFlags, LPWSTR pszName, BOOL
         return S_OK;
 
     /* Get a pointer to the shell view */
-    hr = IUnknown_QueryService(m_pSite, SID_IFolderView, IID_PPV_ARG(IShellView, &lpSV));
+    hr = IUnknown_QueryService(m_pSite, SID_SFolderView, IID_PPV_ARG(IShellView, &lpSV));
     if (FAILED_UNEXPECTEDLY(hr))
         return S_OK;
 
@@ -518,17 +524,14 @@ HRESULT CNewMenu::NewItemByCommand(SHELLNEW_ITEM *pItem, LPCWSTR wszPath)
 HRESULT CNewMenu::NewItemByNonCommand(SHELLNEW_ITEM *pItem, LPWSTR wszName,
                                       DWORD cchNameMax, LPCWSTR wszPath)
 {
-    WCHAR wszBuf[MAX_PATH];
-    WCHAR wszNewFile[MAX_PATH];
     BOOL bSuccess = TRUE;
 
-    if (!LoadStringW(shell32_hInstance, FCIDM_SHVIEW_NEW, wszBuf, _countof(wszBuf)))
-        return E_FAIL;
-
-    StringCchPrintfW(wszNewFile, _countof(wszNewFile), L"%s %s%s", wszBuf, pItem->pwszDesc, pItem->pwszExt);
+    CStringW strNewItem;
+    strNewItem.Format(IDS_NEWITEMFORMAT, pItem->pwszDesc);
+    strNewItem += pItem->pwszExt;
 
     /* Create the name of the new file */
-    if (!PathYetAnotherMakeUniqueName(wszName, wszPath, NULL, wszNewFile))
+    if (!PathYetAnotherMakeUniqueName(wszName, wszPath, NULL, strNewItem))
         return E_FAIL;
 
     /* Create new file */
@@ -701,7 +704,7 @@ HRESULT
 WINAPI
 CNewMenu::HandleMenuMsg(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    return S_OK;
+    return HandleMenuMsg2(uMsg, wParam, lParam, NULL);
 }
 
 HRESULT
@@ -731,19 +734,19 @@ CNewMenu::HandleMenuMsg2(UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT *plRes
             if (!lpdis || lpdis->CtlType != ODT_MENU)
                 break;
 
-            DWORD id = LOWORD(lpdis->itemID);
+            DWORD id = lpdis->itemID;
             HICON hIcon = NULL;
-            if (m_idCmdFirst + id == m_idCmdFolder)
+            if (id == m_idCmdFolder)
             {
                 hIcon = m_hIconFolder;
             }
-            else if (m_idCmdFirst + id == m_idCmdLink)
+            else if (id == m_idCmdLink)
             {
                 hIcon = m_hIconLink;
             }
             else
             {
-                SHELLNEW_ITEM *pItem = FindItemFromIdOffset(id);
+                SHELLNEW_ITEM *pItem = FindItemFromIdOffset(id - m_idCmdFirst);
                 if (pItem)
                     hIcon = pItem->hIcon;
             }
@@ -771,10 +774,32 @@ HRESULT WINAPI
 CNewMenu::Initialize(PCIDLIST_ABSOLUTE pidlFolder,
                      IDataObject *pdtobj, HKEY hkeyProgID)
 {
+    const INT cx = GetSystemMetrics(SM_CXSMICON), cy = GetSystemMetrics(SM_CYSMICON);
+    WCHAR wszIconPath[MAX_PATH];
+    int icon_idx;
+
     m_pidlFolder = ILClone(pidlFolder);
 
     /* Load folder and shortcut icons */
-    m_hIconFolder = (HICON)LoadImage(shell32_hInstance, MAKEINTRESOURCE(IDI_SHELL_FOLDER), IMAGE_ICON, 16, 16, LR_SHARED);
-    m_hIconLink = (HICON)LoadImage(shell32_hInstance, MAKEINTRESOURCE(IDI_SHELL_SHORTCUT), IMAGE_ICON, 16, 16, LR_SHARED);
+    if (HLM_GetIconW(IDI_SHELL_FOLDER - 1, wszIconPath, _countof(wszIconPath), &icon_idx))
+    {
+        ::ExtractIconExW(wszIconPath, icon_idx, &m_hIconFolder, NULL, 1);
+        m_bCustomIconFolder = TRUE;
+    }
+    else
+    {
+        m_hIconFolder = (HICON)LoadImage(shell32_hInstance, MAKEINTRESOURCE(IDI_SHELL_FOLDER), IMAGE_ICON, cx, cy, LR_SHARED);
+    }
+
+    if (HLM_GetIconW(IDI_SHELL_SHORTCUT - 1, wszIconPath, _countof(wszIconPath), &icon_idx))
+    {
+        ::ExtractIconExW(wszIconPath, icon_idx, &m_hIconLink, NULL, 1);
+        m_bCustomIconLink = TRUE;
+    }
+    else
+    {
+        m_hIconLink = (HICON)LoadImage(shell32_hInstance, MAKEINTRESOURCE(IDI_SHELL_SHORTCUT), IMAGE_ICON, cx, cy, LR_SHARED);
+    }
+
     return S_OK;
 }

@@ -132,11 +132,6 @@ BOOLEAN DiskResetController(IN PPC98_DISK_DRIVE DiskDrive)
     return INT386_SUCCESS(Regs);
 }
 
-VOID Pc98DiskPrepareForReactOS(VOID)
-{
-    AtaFree();
-}
-
 PPC98_DISK_DRIVE
 Pc98DiskDriveNumberToDrive(IN UCHAR DriveNumber)
 {
@@ -152,6 +147,24 @@ Pc98DiskDriveNumberToDrive(IN UCHAR DriveNumber)
         return DiskDrive;
     else
         return NULL;
+}
+
+CONFIGURATION_TYPE
+DiskGetConfigType(
+    _In_ UCHAR DriveNumber)
+{
+    PPC98_DISK_DRIVE DiskDrive;
+
+    DiskDrive = Pc98DiskDriveNumberToDrive(DriveNumber);
+    if (!DiskDrive)
+        return -1; // MaximumType;
+
+    if (DiskDrive->Type & DRIVE_CDROM || DiskDrive->Type & DRIVE_MO)
+        return CdromController;
+    else if (DiskDrive->Type & DRIVE_FDD)
+        return FloppyDiskPeripheral;
+    else
+        return DiskPeripheral;
 }
 
 static inline
@@ -187,7 +200,7 @@ Pc98DiskReadLogicalSectorsLBA(
 
     if (DiskDrive->Type & DRIVE_IDE && DiskDrive->Type & DRIVE_CDROM)
     {
-        return AtaAtapiReadLogicalSectorsLBA(AtaGetDevice(DiskDrive->IdeUnitNumber), SectorNumber, SectorCount, Buffer);
+        return AtaReadLogicalSectors(AtaGetDevice(DiskDrive->IdeUnitNumber), SectorNumber, SectorCount, Buffer);
     }
     else
     {
@@ -215,32 +228,23 @@ Pc98DiskReadLogicalSectorsLBA(
         RegsIn.w.bp = ((ULONG_PTR)Buffer) & 0x0F;
 
         /* Retry 3 times */
-        for (RetryCount = 0; RetryCount < 3; RetryCount++)
+        for (RetryCount = 0; RetryCount < 3; ++RetryCount)
         {
             Int386(0x1B, &RegsIn, &RegsOut);
 
-            /* If it worked return TRUE */
-            if (INT386_SUCCESS(RegsOut))
-            {
+            /* If it worked, or if it was a corrected ECC error
+             * and the data is still good, return success */
+            if (INT386_SUCCESS(RegsOut) || (RegsOut.b.ah == 0x08))
                 return TRUE;
-            }
-            /* If it was a corrected ECC error then the data is still good */
-            else if (RegsOut.b.ah == 0x08)
-            {
-                return TRUE;
-            }
-            /* If it failed the do the next retry */
-            else
-            {
-                DiskResetController(DiskDrive);
-                continue;
-            }
+
+            /* It failed, do the next retry */
+            DiskResetController(DiskDrive);
         }
     }
 
     /* If we get here then the read failed */
     DiskError("Disk Read Failed in LBA mode", RegsOut.b.ah);
-    ERR("Disk Read Failed in LBA mode: %x (%s) (DriveNumber: 0x%x SectorNumber: %I64d SectorCount: %d)\n",
+    ERR("Disk Read Failed in LBA mode: %x (%s) (DriveNumber: 0x%x SectorNumber: %I64u SectorCount: %u)\n",
         RegsOut.b.ah, DiskGetErrorCodeString(RegsOut.b.ah),
         DiskDrive->DaUa, SectorNumber, SectorCount);
 
@@ -268,11 +272,11 @@ Pc98DiskReadLogicalSectorsCHS(
     {
         /*
          * Calculate the physical disk offsets.
-         * Note: DriveGeometry.Sectors < 64
+         * Note: DriveGeometry.SectorsPerTrack < 64
          */
-        PhysicalSector = (UCHAR)(SectorNumber % DriveGeometry.Sectors);
-        PhysicalHead = (UCHAR)((SectorNumber / DriveGeometry.Sectors) % DriveGeometry.Heads);
-        PhysicalTrack = (ULONG)((SectorNumber / DriveGeometry.Sectors) / DriveGeometry.Heads);
+        PhysicalSector = (UCHAR)(SectorNumber % DriveGeometry.SectorsPerTrack);
+        PhysicalHead = (UCHAR)((SectorNumber / DriveGeometry.SectorsPerTrack) % DriveGeometry.Heads);
+        PhysicalTrack = (ULONG)((SectorNumber / DriveGeometry.SectorsPerTrack) / DriveGeometry.Heads);
 
         /* Floppy sectors value always start at 1 */
         if (DiskDrive->Type & DRIVE_FDD)
@@ -281,24 +285,19 @@ Pc98DiskReadLogicalSectorsCHS(
         /* Calculate how many sectors we need to read this round */
         if (PhysicalSector > 1)
         {
-            if (SectorCount >= (DriveGeometry.Sectors - (PhysicalSector - 1)))
-                NumberOfSectorsToRead = (DriveGeometry.Sectors - (PhysicalSector - 1));
-            else
-                NumberOfSectorsToRead = SectorCount;
+            NumberOfSectorsToRead = min(SectorCount,
+                                        (DriveGeometry.SectorsPerTrack - (PhysicalSector - 1)));
         }
         else
         {
-            if (SectorCount >= DriveGeometry.Sectors)
-                NumberOfSectorsToRead = DriveGeometry.Sectors;
-            else
-                NumberOfSectorsToRead = SectorCount;
+            NumberOfSectorsToRead = min(SectorCount, DriveGeometry.SectorsPerTrack);
         }
 
         /* Make sure the read is within the geometry boundaries */
         if ((PhysicalHead >= DriveGeometry.Heads) ||
             (PhysicalTrack >= DriveGeometry.Cylinders) ||
-            ((NumberOfSectorsToRead + PhysicalSector) > (DriveGeometry.Sectors + 1)) ||
-            (PhysicalSector > DriveGeometry.Sectors))
+            ((NumberOfSectorsToRead + PhysicalSector) > (DriveGeometry.SectorsPerTrack + 1)) ||
+            (PhysicalSector > DriveGeometry.SectorsPerTrack))
         {
             DiskError("Disk read exceeds drive geometry limits.", 0);
             return FALSE;
@@ -360,33 +359,24 @@ Pc98DiskReadLogicalSectorsCHS(
         }
 
         /* Perform the read. Retry 3 times. */
-        for (RetryCount = 0; RetryCount < 3; RetryCount++)
+        for (RetryCount = 0; RetryCount < 3; ++RetryCount)
         {
             Int386(0x1B, &RegsIn, &RegsOut);
 
-            /* If it worked break out */
-            if (INT386_SUCCESS(RegsOut))
-            {
+            /* If it worked, or if it was a corrected ECC error
+             * and the data is still good, return success */
+            if (INT386_SUCCESS(RegsOut) || (RegsOut.b.ah == 0x08))
                 break;
-            }
-            /* If it was a corrected ECC error then the data is still good */
-            else if (RegsOut.b.ah == 0x08)
-            {
-                break;
-            }
-            /* If it failed then do the next retry */
-            else
-            {
-                DiskResetController(DiskDrive);
-                continue;
-            }
+
+            /* It failed, do the next retry */
+            DiskResetController(DiskDrive);
         }
 
         /* If we retried 3 times then fail */
         if (RetryCount >= 3)
         {
             DiskError("Disk Read Failed in CHS mode, after retrying 3 times", RegsOut.b.ah);
-            ERR("Disk Read Failed in CHS mode, after retrying 3 times: %x (%s) (DriveNumber: 0x%x SectorNumber: %I64d SectorCount: %d)\n",
+            ERR("Disk Read Failed in CHS mode, after retrying 3 times: %x (%s) (DriveNumber: 0x%x SectorNumber: %I64u SectorCount: %u)\n",
                 RegsOut.b.ah, DiskGetErrorCodeString(RegsOut.b.ah),
                 DiskDrive->DaUa, SectorNumber, SectorCount);
             return FALSE;
@@ -439,7 +429,7 @@ InitScsiDrive(
 
         DiskDrive->Geometry.Cylinders = RegsOut.w.cx;
         DiskDrive->Geometry.Heads = RegsOut.b.dh;
-        DiskDrive->Geometry.Sectors = RegsOut.b.dl;
+        DiskDrive->Geometry.SectorsPerTrack = RegsOut.b.dl;
         DiskDrive->Geometry.BytesPerSector = RegsOut.w.bx;
         DiskDrive->LBASupported = FALSE;
         DiskDrive->IsRemovable = FALSE;
@@ -454,7 +444,7 @@ InitScsiDrive(
                 /* CD-ROM */
                 DiskDrive->Geometry.Cylinders = 0xFFFF;
                 DiskDrive->Geometry.Heads = 0xFFFF;
-                DiskDrive->Geometry.Sectors = 0xFFFF;
+                DiskDrive->Geometry.SectorsPerTrack = 0xFFFF;
                 DiskDrive->Geometry.BytesPerSector = 2048;
                 DiskDrive->Type = DRIVE_CDROM;
                 DiskDrive->LBASupported = TRUE;
@@ -465,7 +455,7 @@ InitScsiDrive(
                 /* Magneto-optical drive */
                 DiskDrive->Geometry.Cylinders = 0xFFFF;
                 DiskDrive->Geometry.Heads = 8;
-                DiskDrive->Geometry.Sectors = 32;
+                DiskDrive->Geometry.SectorsPerTrack = 32;
                 DiskDrive->Geometry.BytesPerSector = 512;
                 DiskDrive->Type = DRIVE_MO;
                 DiskDrive->LBASupported = TRUE;
@@ -483,6 +473,10 @@ InitScsiDrive(
         return FALSE;
     }
 
+    DiskDrive->Geometry.Sectors = (ULONGLONG)DiskDrive->Geometry.Cylinders *
+                                             DiskDrive->Geometry.Heads *
+                                             DiskDrive->Geometry.SectorsPerTrack;
+
     DiskDrive->DaUa = DaUa;
     DiskDrive->Type |= DRIVE_SCSI;
     DiskDrive->Initialized = TRUE;
@@ -491,10 +485,12 @@ InitScsiDrive(
           "Cylinders  : 0x%x\n"
           "Heads      : 0x%x\n"
           "Sects/Track: 0x%x\n"
+          "Total Sects: 0x%llx\n"
           "Bytes/Sect : 0x%x\n",
           DaUa,
           DiskDrive->Geometry.Cylinders,
           DiskDrive->Geometry.Heads,
+          DiskDrive->Geometry.SectorsPerTrack,
           DiskDrive->Geometry.Sectors,
           DiskDrive->Geometry.BytesPerSector);
 
@@ -513,8 +509,10 @@ InitIdeDrive(
     {
         DiskDrive->Geometry.Cylinders = DeviceUnit->Cylinders;
         DiskDrive->Geometry.Heads = DeviceUnit->Heads;
-        DiskDrive->Geometry.Sectors = DeviceUnit->Sectors;
+        DiskDrive->Geometry.SectorsPerTrack = DeviceUnit->SectorsPerTrack;
         DiskDrive->Geometry.BytesPerSector = DeviceUnit->SectorSize;
+        DiskDrive->Geometry.Sectors = DeviceUnit->TotalSectors;
+
         DiskDrive->DaUa = 0xFF;
         DiskDrive->IdeUnitNumber = UnitNumber;
         DiskDrive->Type = DRIVE_IDE | DRIVE_CDROM;
@@ -526,10 +524,12 @@ InitIdeDrive(
               "Cylinders  : 0x%x\n"
               "Heads      : 0x%x\n"
               "Sects/Track: 0x%x\n"
+              "Total Sects: 0x%llx\n"
               "Bytes/Sect : 0x%x\n",
               UnitNumber,
               DiskDrive->Geometry.Cylinders,
               DiskDrive->Geometry.Heads,
+              DiskDrive->Geometry.SectorsPerTrack,
               DiskDrive->Geometry.Sectors,
               DiskDrive->Geometry.BytesPerSector);
 
@@ -582,8 +582,13 @@ InitHardDrive(
 
     DiskDrive->Geometry.Cylinders = RegsOut.w.cx;
     DiskDrive->Geometry.Heads = RegsOut.b.dh;
-    DiskDrive->Geometry.Sectors = RegsOut.b.dl;
+    DiskDrive->Geometry.SectorsPerTrack = RegsOut.b.dl;
     DiskDrive->Geometry.BytesPerSector = RegsOut.w.bx;
+
+    DiskDrive->Geometry.Sectors = (ULONGLONG)DiskDrive->Geometry.Cylinders *
+                                             DiskDrive->Geometry.Heads *
+                                             DiskDrive->Geometry.SectorsPerTrack;
+
     DiskDrive->DaUa = DaUa;
     DiskDrive->Type = DRIVE_IDE;
     DiskDrive->LBASupported = FALSE;
@@ -594,10 +599,12 @@ InitHardDrive(
           "Cylinders  : 0x%x\n"
           "Heads      : 0x%x\n"
           "Sects/Track: 0x%x\n"
+          "Total Sects: 0x%llx\n"
           "Bytes/Sect : 0x%x\n",
           DaUa,
           DiskDrive->Geometry.Cylinders,
           DiskDrive->Geometry.Heads,
+          DiskDrive->Geometry.SectorsPerTrack,
           DiskDrive->Geometry.Sectors,
           DiskDrive->Geometry.BytesPerSector);
 
@@ -647,14 +654,14 @@ InitFloppyDrive(
                 /* 320 kB 2DD */
                 DiskDrive->Geometry.Cylinders = 80;
                 DiskDrive->Geometry.Heads = 2;
-                DiskDrive->Geometry.Sectors = 16;
+                DiskDrive->Geometry.SectorsPerTrack = 16;
             }
             else
             {
                 /* 1 MB 2HD */
                 DiskDrive->Geometry.Cylinders = 77;
                 DiskDrive->Geometry.Heads = 2;
-                DiskDrive->Geometry.Sectors = 26;
+                DiskDrive->Geometry.SectorsPerTrack = 26;
             }
             break;
 
@@ -664,21 +671,21 @@ InitFloppyDrive(
                 /* 1.44 MB 2HD */
                 DiskDrive->Geometry.Cylinders = 80;
                 DiskDrive->Geometry.Heads = 2;
-                DiskDrive->Geometry.Sectors = 18;
+                DiskDrive->Geometry.SectorsPerTrack = 18;
             }
             else if (DeviceAddress == 0x70 || DeviceAddress == 0xF0)
             {
                 /* 720/640 kB 2DD */
                 DiskDrive->Geometry.Cylinders = 80;
                 DiskDrive->Geometry.Heads = 2;
-                DiskDrive->Geometry.Sectors = 8;
+                DiskDrive->Geometry.SectorsPerTrack = 8;
             }
             else
             {
                 /* 1.2 MB 2HC */
                 DiskDrive->Geometry.Cylinders = 80;
                 DiskDrive->Geometry.Heads = 2;
-                DiskDrive->Geometry.Sectors = 15;
+                DiskDrive->Geometry.SectorsPerTrack = 15;
             }
             break;
 
@@ -686,7 +693,7 @@ InitFloppyDrive(
             /* 1.25 MB 2HD */
             DiskDrive->Geometry.Cylinders = 77;
             DiskDrive->Geometry.Heads = 2;
-            DiskDrive->Geometry.Sectors = 8;
+            DiskDrive->Geometry.SectorsPerTrack = 8;
             break;
 
         default:
@@ -695,6 +702,10 @@ InitFloppyDrive(
     }
 
     DiskDrive->Geometry.BytesPerSector = BytesPerSector;
+    DiskDrive->Geometry.Sectors = (ULONGLONG)DiskDrive->Geometry.Cylinders *
+                                             DiskDrive->Geometry.Heads *
+                                             DiskDrive->Geometry.SectorsPerTrack;
+
     DiskDrive->DaUa = DaUa;
     DiskDrive->Type = DRIVE_FDD;
     DiskDrive->LBASupported = FALSE;
@@ -705,10 +716,12 @@ InitFloppyDrive(
           "Cylinders  : 0x%x\n"
           "Heads      : 0x%x\n"
           "Sects/Track: 0x%x\n"
+          "Total Sects: 0x%llx\n"
           "Bytes/Sect : 0x%x\n",
           DaUa,
           DiskDrive->Geometry.Cylinders,
           DiskDrive->Geometry.Heads,
+          DiskDrive->Geometry.SectorsPerTrack,
           DiskDrive->Geometry.Sectors,
           DiskDrive->Geometry.BytesPerSector);
 
@@ -842,7 +855,7 @@ Pc98DiskReadLogicalSectors(
 {
     PPC98_DISK_DRIVE DiskDrive;
 
-    TRACE("Pc98DiskReadLogicalSectors() DriveNumber: 0x%x SectorNumber: %I64d SectorCount: %d Buffer: 0x%x\n",
+    TRACE("Pc98DiskReadLogicalSectors() DriveNumber: 0x%x SectorNumber: %I64u SectorCount: %u Buffer: 0x%x\n",
           DriveNumber, SectorNumber, SectorCount, Buffer);
 
     /* 16-bit BIOS addressing limitation */
@@ -898,5 +911,5 @@ Pc98DiskGetCacheableBlockCount(UCHAR DriveNumber)
     if (DiskDrive->LBASupported)
         return 64;
     else
-        return DiskDrive->Geometry.Sectors;
+        return DiskDrive->Geometry.SectorsPerTrack;
 }

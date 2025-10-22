@@ -42,6 +42,7 @@ static const NDIS_OID NvpSupportedOidList[] =
     OID_802_3_CURRENT_ADDRESS,
     OID_802_3_MULTICAST_LIST,
     OID_802_3_MAXIMUM_LIST_SIZE,
+    OID_GEN_PHYSICAL_MEDIUM,
 
     /* Statistics */
     OID_GEN_XMIT_OK,
@@ -693,30 +694,6 @@ NvNetAddWakeUpPattern(
 }
 
 static
-BOOLEAN
-NvEqualMemory(
-    _In_reads_bytes_(Length) PVOID Destination,
-    _In_reads_bytes_(Length) PVOID Source,
-    _In_ ULONG Length)
-{
-    ULONG i;
-    PUCHAR Src, Dest;
-
-    Src = Source;
-    Dest = Destination;
-    for (i = 0; i < Length; ++i)
-    {
-        if (Src[i] != Dest[i])
-            return FALSE;
-    }
-
-    return TRUE;
-}
-/* 'memcmp' is unavailable for some reason */
-#undef NdisEqualMemory
-#define NdisEqualMemory NvEqualMemory
-
-static
 NDIS_STATUS
 NvNetRemoveWakeUpPattern(
     _In_ PNVNET_ADAPTER Adapter,
@@ -1220,6 +1197,12 @@ MiniportQueryInformation(
         case OID_802_3_MAXIMUM_LIST_SIZE:
         {
             GenericInfo.Ulong = NVNET_MULTICAST_LIST_SIZE;
+            break;
+        }
+
+        case OID_GEN_PHYSICAL_MEDIUM:
+        {
+            GenericInfo.Ulong = NdisPhysicalMedium802_3;
             break;
         }
 

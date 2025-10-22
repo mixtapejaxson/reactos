@@ -1,4 +1,6 @@
 
+add_definitions(-D__ROS_LONG64__)
+
 remove_definitions(-DWINVER=0x502 -D_WIN32_WINNT=0x502)
 add_definitions(-DWINVER=0x602 -D_WIN32_WINNT=0x602)
 
@@ -47,7 +49,6 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
 endif()
 
 add_pch(user32_winetest precomp.h "${PCH_SKIP_SOURCE}")
-# some tests need to be run from an app compiled as GUI
-set_module_type(user32_winetest win32gui)
+set_module_type(user32_winetest win32cui)
 add_importlibs(user32_winetest user32 gdi32 advapi32 msvcrt kernel32)
 add_rostests_file(TARGET user32_winetest)

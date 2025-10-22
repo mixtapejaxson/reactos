@@ -35,7 +35,7 @@ extern "C" {
 #define X86_FEATURE_PAE         0x00000040 /* physical address extension is present */
 #define X86_FEATURE_CX8         0x00000100 /* CMPXCHG8B instruction present */
 #define X86_FEATURE_SYSCALL     0x00000800 /* SYSCALL/SYSRET support present */
-#define X86_FEATURE_MTTR        0x00001000 /* Memory type range registers are present */
+#define X86_FEATURE_MTRR        0x00001000 /* Memory type range registers are present */
 #define X86_FEATURE_PGE         0x00002000 /* Page Global Enable */
 #define X86_FEATURE_CMOV        0x00008000 /* "Conditional move" instruction supported */
 #define X86_FEATURE_PAT         0x00010000 /* Page Attribute Table is supported */
@@ -87,6 +87,8 @@ extern "C" {
 #define APIC_EOI_REGISTER 0xFFFFFFFFFFFE00B0ULL
 
 #ifndef __ASM__
+
+extern SIZE_T KeXStateLength;
 
 #include "intrin_i.h"
 
@@ -206,8 +208,8 @@ KeGetTrapFrameFrameRegister(PKTRAP_FRAME TrapFrame)
 // Macro to get trap and exception frame from a thread stack
 //
 #define KeGetTrapFrame(Thread) \
-    (PKTRAP_FRAME)((ULONG_PTR)((Thread)->InitialStack) - \
-                   sizeof(KTRAP_FRAME))
+    ((PKTRAP_FRAME)((ULONG_PTR)((Thread)->InitialStack) - \
+                   sizeof(KTRAP_FRAME)))
 
 //
 // Macro to get context switches from the PRCB
@@ -356,7 +358,10 @@ KiEndInterrupt(IN KIRQL Irql,
 {
     /* Make sure this is from the clock handler */
     ASSERT(TrapFrame->ErrorCode == 0xc10c4);
-    //KeLowerIrql(Irql);
+
+    /* Disable interrupts and end the interrupt */
+    _disable();
+    HalEndSystemInterrupt(Irql, TrapFrame);
 }
 
 FORCEINLINE
@@ -384,8 +389,6 @@ Ki386PerfEnd(VOID)
 }
 
 struct _KPCR;
-
-//VOID KiInitializeTss(IN PKTSS Tss, IN UINT64 Stack);
 
 DECLSPEC_NORETURN VOID KiSwitchToBootStack(IN ULONG_PTR InitialStack);
 VOID KiDivideErrorFault(VOID);
@@ -418,8 +421,11 @@ VOID Ki386InitializeLdt(VOID);
 VOID Ki386SetProcessorFeatures(VOID);
 VOID KiGetCacheInformation(VOID);
 VOID KiSetProcessorType(VOID);
-ULONG KiGetFeatureBits(VOID);
+ULONG64 KiGetFeatureBits(VOID);
 VOID KiInitializeCpuFeatures(VOID);
+#if DBG
+VOID KiReportCpuFeatures(IN PKPRCB Prcb);
+#endif
 
 ULONG KeAllocateGdtSelector(ULONG Desc[2]);
 VOID KeFreeGdtSelector(ULONG Entry);
@@ -468,10 +474,37 @@ KiGetUserModeStackAddress(void)
 }
 
 VOID
+KiGetTrapContext(
+    _In_ PKTRAP_FRAME TrapFrame,
+    _Out_ PCONTEXT Context);
+
+VOID
 KiSetTrapContext(
     _Out_ PKTRAP_FRAME TrapFrame,
     _In_ PCONTEXT Context,
     _In_ KPROCESSOR_MODE RequestorMode);
+
+// Exits to user mode, only restores the trap frame, zeroes the non-volatile registers
+DECLSPEC_NORETURN
+VOID
+KiUserCallbackExit(
+    _In_ PKTRAP_FRAME TrapFrame);
+
+DECLSPEC_NORETURN
+VOID
+KiExceptionExit(
+    _In_ PKTRAP_FRAME TrapFrame,
+    _In_ PKEXCEPTION_FRAME ExceptionFrame);
+
+BOOLEAN
+KiProcessorFreezeHandler(
+    _In_ PKTRAP_FRAME TrapFrame,
+    _In_ PKEXCEPTION_FRAME ExceptionFrame);
+
+VOID
+NTAPI
+KiInitializeXStateConfiguration(
+    _In_ ULONG Processor);
 
 #ifdef __cplusplus
 } // extern "C"

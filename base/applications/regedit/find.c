@@ -1,19 +1,7 @@
 /*
  * Regedit find dialog
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * LICENSE: LGPL-2.1-or-later (https://spdx.org/licenses/LGPL-2.1-or-later)
  */
 
 #include "regedit.h"
@@ -91,7 +79,7 @@ static BOOL CompareName(LPCWSTR pszName1, LPCWSTR pszName2)
 static BOOL MatchString(LPCWCH pch1, INT cch1, LPCWCH pch2, INT cch2)
 {
     INT i;
-    DWORD dwNorm = ((s_dwFlags & RSF_MATCHCASE) ? NORM_IGNORECASE : 0);
+    DWORD dwNorm = ((s_dwFlags & RSF_MATCHCASE) ? 0 : NORM_IGNORECASE);
 
     if (s_dwFlags & RSF_WHOLESTRING)
         return 2 == CompareStringW(LOCALE_SYSTEM_DEFAULT, dwNorm, pch1, cch1, pch2, cch2);
@@ -144,7 +132,7 @@ BOOL RegFindRecurse(
     if(wcslen(pszSubKey) >= _countof(szSubKey))
         return FALSE;
 
-    wcscpy(szSubKey, pszSubKey);
+    StringCbCopyW(szSubKey, sizeof(szSubKey), pszSubKey);
     hSubKey = NULL;
 
     lResult = RegOpenKeyExW(hKey, szSubKey, 0, KEY_ALL_ACCESS, &hSubKey);
@@ -304,14 +292,14 @@ BOOL RegFindRecurse(
                            ppszFoundValueName))
         {
             LPWSTR psz = *ppszFoundSubKey;
-            *ppszFoundSubKey = malloc(
-                                   (wcslen(szSubKey) + wcslen(psz) + 2) * sizeof(WCHAR));
+            SIZE_T cbFoundSubKey = (wcslen(szSubKey) + wcslen(psz) + 2) * sizeof(WCHAR);
+            *ppszFoundSubKey = malloc(cbFoundSubKey);
             if (*ppszFoundSubKey == NULL)
                 goto err;
             if (szSubKey[0])
             {
-                wcscpy(*ppszFoundSubKey, szSubKey);
-                wcscat(*ppszFoundSubKey, s_backslash);
+                StringCbCopyW(*ppszFoundSubKey, cbFoundSubKey, szSubKey);
+                StringCbCatW(*ppszFoundSubKey, cbFoundSubKey, s_backslash);
             }
             else
                 **ppszFoundSubKey = 0;
@@ -368,7 +356,7 @@ BOOL RegFindWalk(
                        ppszFoundValueName))
         return TRUE;
 
-    wcscpy(szSubKey, pszSubKey);
+    StringCbCopyW(szSubKey, sizeof(szSubKey), pszSubKey);
     while(szSubKey[0] != 0)
     {
         if (DoEvents())
@@ -460,15 +448,14 @@ BOOL RegFindWalk(
                                ppszFoundSubKey, ppszFoundValueName))
             {
                 LPWSTR psz = *ppszFoundSubKey;
-                *ppszFoundSubKey = malloc(
-                                       (wcslen(szSubKey) + wcslen(psz) + 2) *
-                                       sizeof(WCHAR));
+                SIZE_T cbFoundSubKey = (wcslen(szSubKey) + wcslen(psz) + 2) * sizeof(WCHAR);
+                *ppszFoundSubKey = malloc(cbFoundSubKey);
                 if (*ppszFoundSubKey == NULL)
                     goto err;
                 if (szSubKey[0])
                 {
-                    wcscpy(*ppszFoundSubKey, szSubKey);
-                    wcscat(*ppszFoundSubKey, s_backslash);
+                    StringCbCopyW(*ppszFoundSubKey, cbFoundSubKey, szSubKey);
+                    StringCbCatW(*ppszFoundSubKey, cbFoundSubKey, s_backslash);
                 }
                 else
                     **ppszFoundSubKey = 0;
@@ -543,7 +530,6 @@ success:
         RegCloseKey(hSubKey);
     return TRUE;
 }
-
 
 static DWORD GetFindFlags(void)
 {

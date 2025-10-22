@@ -8,7 +8,7 @@
 
 #include "precomp.h"
 
-#define YDEBUG
+// #define NDEBUG
 #include <debug.h>
 
 ULONG
@@ -105,7 +105,6 @@ MMixerOpen(
 
     /* add the event */
     Status = MMixerAddEvent(MixerContext, MixerInfo, MixerEventContext, MixerEventRoutine);
-
 
     /* store result */
     *MixerHandle = (HANDLE)MixerInfo;
@@ -687,7 +686,6 @@ MMixerPrintMixers(
     DPRINT1("WaveOutCount %lu\n", MixerList->WaveOutListCount);
     DPRINT1("MixerCount %p\n", MixerList->MixerListCount);
 
-
     for(Index = 0; Index < MixerList->MixerListCount; Index++)
     {
         /* get mixer info */
@@ -819,11 +817,8 @@ MMixerInitialize(
      /* store mixer list */
      MixerContext->MixerContext = (PVOID)MixerList;
 
-    /* start enumerating all available devices */
-    Count = 0;
-    DeviceIndex = 0;
-
-    do
+    /* enumerate all available devices */
+    for (DeviceIndex = 0; ; DeviceIndex++)
     {
         /* enumerate a device */
         Status = EnumFunction(EnumContext, DeviceIndex, &DeviceName, &hMixer, &hKey);
@@ -836,29 +831,27 @@ MMixerInitialize(
                 /* enumeration has finished */
                 break;
             }
-            else
-            {
-                DPRINT1("Failed to enumerate device %lu\n", DeviceIndex);
 
-                /* TODO cleanup */
-                return Status;
-            }
+            DPRINT1("EnumFunction() failed for device %lu, Status %x\n", DeviceIndex, Status);
+
+            /* ignore error and continue */
         }
         else
         {
             /* create a mixer data entry */
             Status = MMixerCreateMixerData(MixerContext, MixerList, DeviceIndex, DeviceName, hMixer, hKey);
             if (Status != MM_STATUS_SUCCESS)
-                break;
-        }
+                DPRINT1("MMixerCreateMixerData() failed for device %lu, Status %x\n",
+                        DeviceIndex, Status);
 
-        /* increment device index */
-        DeviceIndex++;
-    }while(TRUE);
+            /* ignore error and continue */
+        }
+    }
 
     /* now all filters have been pre-opened
      * lets enumerate the filters
      */
+    Count = 0;
     Entry = MixerList->MixerData.Flink;
     while(Entry != &MixerList->MixerData)
     {

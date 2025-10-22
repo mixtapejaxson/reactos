@@ -3,7 +3,7 @@
  * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
  * PURPOSE:     FAT filesystem driver for FreeLoader
  * COPYRIGHT:   Copyright 1998-2003 Brian Palmer (brianp@sginet.com)
- *              Copyright 2009 Hervé Poussineau
+ *              Copyright 2009 HervÃ© Poussineau
  *              Copyright 2019 Victor Perevertkin (victor.perevertkin@reactos.org)
  */
 
@@ -14,7 +14,6 @@ DBG_DEFAULT_CHANNEL(FILESYSTEM);
 
 ULONG    FatDetermineFatType(PFAT_BOOTSECTOR FatBootSector, ULONGLONG PartitionSectorCount);
 PVOID    FatBufferDirectory(PFAT_VOLUME_INFO Volume, ULONG DirectoryStartCluster, ULONG* EntryCountPointer, BOOLEAN RootDirectory);
-BOOLEAN    FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID DirectoryBuffer, ULONG EntryCount, PCHAR FileName, PFAT_FILE_INFO FatFileInfoPointer);
 ARC_STATUS FatLookupFile(PFAT_VOLUME_INFO Volume, PCSTR FileName, PFAT_FILE_INFO FatFileInfoPointer);
 void    FatParseShortFileName(PCHAR Buffer, PDIRENTRY DirEntry);
 static BOOLEAN FatGetFatEntry(PFAT_VOLUME_INFO Volume, UINT32 Cluster, PUINT32 ClusterPointer);
@@ -503,7 +502,7 @@ PVOID FatBufferDirectory(PFAT_VOLUME_INFO Volume, ULONG DirectoryStartCluster, U
     return DirectoryBuffer->Data;
 }
 
-BOOLEAN FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID DirectoryBuffer, ULONG DirectorySize, PCHAR FileName, PFAT_FILE_INFO FatFileInfoPointer)
+static BOOLEAN FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID DirectoryBuffer, ULONG DirectorySize, PCHAR FileName, PFAT_FILE_INFO FatFileInfoPointer)
 {
     ULONG        EntryCount;
     ULONG        CurrentEntry;
@@ -557,7 +556,7 @@ BOOLEAN FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID Directory
         // Check if this is a LFN entry
         // If so it needs special handling
         //
-        if (DirEntry->Attr == ATTR_LONG_NAME)
+        if (DirEntry->Attr == FAT_ATTR_LONG_NAME)
         {
             //
             // Check to see if this is a deleted LFN entry, if so continue
@@ -640,7 +639,7 @@ BOOLEAN FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID Directory
         // Check for the volume label attribute
         // and skip over this entry if found
         //
-        if (DirEntry->Attr & ATTR_VOLUMENAME)
+        if (DirEntry->Attr & FAT_ATTR_VOLUMENAME)
         {
             RtlZeroMemory(ShortNameBuffer, 13 * sizeof(UCHAR));
             RtlZeroMemory(LfnNameBuffer, 261 * sizeof(UCHAR));
@@ -667,8 +666,8 @@ BOOLEAN FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID Directory
         //
         // See if the file name matches either the short or long name
         //
-        if (((strlen(FileName) == strlen(LfnNameBuffer)) && (_stricmp(FileName, LfnNameBuffer) == 0)) ||
-            ((strlen(FileName) == strlen(ShortNameBuffer)) && (_stricmp(FileName, ShortNameBuffer) == 0)))        {
+        if ((_stricmp(FileName, LfnNameBuffer) == 0) || (_stricmp(FileName, ShortNameBuffer) == 0))
+        {
             //
             // We found the entry, now fill in the FAT_FILE_INFO struct
             //
@@ -680,7 +679,9 @@ BOOLEAN FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID Directory
             FatFileInfoPointer->StartCluster = StartCluster;
 
             TRACE("MSDOS Directory Entry:\n");
-            TRACE("FileName[11] = %c%c%c%c%c%c%c%c%c%c%c\n", DirEntry->FileName[0], DirEntry->FileName[1], DirEntry->FileName[2], DirEntry->FileName[3], DirEntry->FileName[4], DirEntry->FileName[5], DirEntry->FileName[6], DirEntry->FileName[7], DirEntry->FileName[8], DirEntry->FileName[9], DirEntry->FileName[10]);
+            TRACE("FileName[11] = %c%c%c%c%c%c%c%c%c%c%c\n",
+                  DirEntry->FileName[0], DirEntry->FileName[1], DirEntry->FileName[2], DirEntry->FileName[3], DirEntry->FileName[4],
+                  DirEntry->FileName[5], DirEntry->FileName[6], DirEntry->FileName[7], DirEntry->FileName[8], DirEntry->FileName[9], DirEntry->FileName[10]);
             TRACE("Attr = 0x%x\n", DirEntry->Attr);
             TRACE("ReservedNT = 0x%x\n", DirEntry->ReservedNT);
             TRACE("TimeInTenths = %d\n", DirEntry->TimeInTenths);
@@ -702,7 +703,6 @@ BOOLEAN FatSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID Directory
         //
         RtlZeroMemory(ShortNameBuffer, 13 * sizeof(UCHAR));
         RtlZeroMemory(LfnNameBuffer, 261 * sizeof(UCHAR));
-        continue;
     }
 
     return FALSE;
@@ -734,8 +734,8 @@ static BOOLEAN FatXSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID D
         {
             continue;
         }
-        if (FileNameLen == DirEntry->FileNameSize &&
-            0 == _strnicmp(FileName, DirEntry->FileName, FileNameLen))
+        if ((FileNameLen == DirEntry->FileNameSize) &&
+            (_strnicmp(FileName, DirEntry->FileName, FileNameLen) == 0))
         {
             /*
              * We found the entry, now fill in the FAT_FILE_INFO struct
@@ -773,8 +773,8 @@ static BOOLEAN FatXSearchDirectoryBufferForFile(PFAT_VOLUME_INFO Volume, PVOID D
  */
 ARC_STATUS FatLookupFile(PFAT_VOLUME_INFO Volume, PCSTR FileName, PFAT_FILE_INFO FatFileInfoPointer)
 {
-    UINT32        i;
     ULONG        NumberOfPathParts;
+    ULONG        i;
     CHAR        PathPart[261];
     PVOID        DirectoryBuffer;
     ULONG        DirectoryStartCluster = 0;
@@ -784,6 +784,11 @@ ARC_STATUS FatLookupFile(PFAT_VOLUME_INFO Volume, PCSTR FileName, PFAT_FILE_INFO
     TRACE("FatLookupFile() FileName = %s\n", FileName);
 
     RtlZeroMemory(FatFileInfoPointer, sizeof(FAT_FILE_INFO));
+
+    /* Skip leading path separator, if any */
+    if (*FileName == '\\' || *FileName == '/')
+        ++FileName;
+    PathPart[0] = ANSI_NULL;
 
     //
     // Figure out how many sub-directories we are nested in
@@ -844,7 +849,7 @@ ARC_STATUS FatLookupFile(PFAT_VOLUME_INFO Volume, PCSTR FileName, PFAT_FILE_INFO
             //
             // Check if current entry is a directory
             //
-            if (!(FatFileInfo.Attributes & ATTR_DIRECTORY))
+            if (!(FatFileInfo.Attributes & FAT_ATTR_DIRECTORY))
             {
                 return ENOTDIR;
             }
@@ -852,7 +857,25 @@ ARC_STATUS FatLookupFile(PFAT_VOLUME_INFO Volume, PCSTR FileName, PFAT_FILE_INFO
         }
     }
 
-    RtlCopyMemory(FatFileInfoPointer, &FatFileInfo, sizeof(FAT_FILE_INFO));
+    RtlCopyMemory(FatFileInfoPointer, &FatFileInfo, sizeof(FatFileInfo));
+
+    /* Re-map the attributes to ARC file attributes */
+    FatFileInfoPointer->Attributes = 0;
+    if (FatFileInfo.Attributes & FAT_ATTR_READONLY)
+        FatFileInfoPointer->Attributes |= ReadOnlyFile;
+    if (FatFileInfo.Attributes & FAT_ATTR_HIDDEN)
+        FatFileInfoPointer->Attributes |= HiddenFile;
+    if (FatFileInfo.Attributes & FAT_ATTR_SYSTEM)
+        FatFileInfoPointer->Attributes |= SystemFile;
+    if (FatFileInfo.Attributes & FAT_ATTR_ARCHIVE)
+        FatFileInfoPointer->Attributes |= ArchiveFile;
+    if (FatFileInfo.Attributes & FAT_ATTR_DIRECTORY)
+        FatFileInfoPointer->Attributes |= DirectoryFile;
+
+    /* Copy the file name, perhaps truncated */
+    FatFileInfoPointer->FileNameLength = (ULONG)strlen(PathPart);
+    FatFileInfoPointer->FileNameLength = min(FatFileInfoPointer->FileNameLength, sizeof(FatFileInfoPointer->FileName) - 1);
+    RtlCopyMemory(FatFileInfoPointer->FileName, PathPart, FatFileInfoPointer->FileNameLength);
 
     return ESUCCESS;
 }
@@ -1369,7 +1392,7 @@ BOOLEAN FatReadVolumeSectors(PFAT_VOLUME_INFO Volume, ULONG SectorNumber, ULONG 
     //
     // Seek to right position
     //
-    Position.QuadPart = (ULONGLONG)SectorNumber * 512;
+    Position.QuadPart = (ULONGLONG)SectorNumber * Volume->BytesPerSector;
     Status = ArcSeek(Volume->DeviceId, &Position, SeekAbsolute);
     if (Status != ESUCCESS)
     {
@@ -1380,8 +1403,8 @@ BOOLEAN FatReadVolumeSectors(PFAT_VOLUME_INFO Volume, ULONG SectorNumber, ULONG 
     //
     // Read data
     //
-    Status = ArcRead(Volume->DeviceId, Buffer, SectorCount * 512, &Count);
-    if (Status != ESUCCESS || Count != SectorCount * 512)
+    Status = ArcRead(Volume->DeviceId, Buffer, SectorCount * Volume->BytesPerSector, &Count);
+    if (Status != ESUCCESS || Count != SectorCount * Volume->BytesPerSector)
     {
         TRACE("FatReadVolumeSectors() Failed to read\n");
         return FALSE;
@@ -1407,6 +1430,14 @@ ARC_STATUS FatGetFileInformation(ULONG FileId, FILEINFORMATION* Information)
     RtlZeroMemory(Information, sizeof(*Information));
     Information->EndingAddress.LowPart = FileHandle->FileSize;
     Information->CurrentAddress.LowPart = FileHandle->FilePointer;
+
+    /* Set the ARC file attributes */
+    Information->Attributes = FileHandle->Attributes;
+
+    /* Copy the file name, perhaps truncated, and NUL-terminated */
+    Information->FileNameLength = min(FileHandle->FileNameLength, sizeof(Information->FileName) - 1);
+    RtlCopyMemory(Information->FileName, FileHandle->FileName, Information->FileNameLength);
+    Information->FileName[Information->FileNameLength] = ANSI_NULL;
 
     TRACE("FatGetFileInformation(%lu) -> FileSize = %lu, FilePointer = 0x%lx\n",
           FileId, Information->EndingAddress.LowPart, Information->CurrentAddress.LowPart);
@@ -1439,7 +1470,7 @@ ARC_STATUS FatOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
     //
     // Check if caller opened what he expected (dir vs file)
     //
-    IsDirectory = (TempFileInfo.Attributes & ATTR_DIRECTORY) != 0;
+    IsDirectory = !!(TempFileInfo.Attributes & DirectoryFile);
     if (IsDirectory && OpenMode != OpenDirectory)
         return EISDIR;
     else if (!IsDirectory && OpenMode != OpenReadOnly)
@@ -1461,14 +1492,8 @@ ARC_STATUS FatRead(ULONG FileId, VOID* Buffer, ULONG N, ULONG* Count)
     PFAT_FILE_INFO FileHandle = FsGetDeviceSpecific(FileId);
     BOOLEAN Success;
 
-    //
-    // Call old read method
-    //
+    /* Call old read method */
     Success = FatReadFile(FileHandle, N, Count, Buffer);
-
-    //
-    // Check for success
-    //
     if (Success)
         return ESUCCESS;
     else

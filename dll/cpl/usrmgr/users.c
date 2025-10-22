@@ -15,6 +15,7 @@
  */
 
 #include "usrmgr.h"
+#include <winreg.h>
 
 typedef struct _USER_DATA
 {
@@ -60,7 +61,6 @@ ChangePasswordDlgProc(HWND hwndDlg,
                       LPARAM lParam)
 {
     PUSER_INFO_1003 userInfo;
-    INT nLength;
 
     UNREFERENCED_PARAMETER(wParam);
 
@@ -79,14 +79,9 @@ ChangePasswordDlgProc(HWND hwndDlg,
                 case IDOK:
                     if (CheckPasswords(hwndDlg, IDC_EDIT_PASSWORD1, IDC_EDIT_PASSWORD2))
                     {
-
                         /* Store the password */
-                        nLength = SendDlgItemMessage(hwndDlg, IDC_EDIT_PASSWORD1, WM_GETTEXTLENGTH, 0, 0);
-                        if (nLength > 0)
-                        {
-                            userInfo->usri1003_password = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nLength + 1) * sizeof(WCHAR));
-                            GetDlgItemText(hwndDlg, IDC_EDIT_PASSWORD1, userInfo->usri1003_password, nLength + 1);
-                        }
+                        userInfo->usri1003_password =
+                            GetDlgItemTextAlloc(hwndDlg, IDC_EDIT_PASSWORD1);
 
                         EndDialog(hwndDlg, IDOK);
                     }
@@ -147,8 +142,7 @@ UserChangePassword(HWND hwndDlg)
         }
     }
 
-    if (user.usri1003_password)
-        HeapFree(GetProcessHeap(), 0, user.usri1003_password);
+    HeapFree(GetProcessHeap(), 0, user.usri1003_password);
 }
 
 
@@ -250,36 +244,16 @@ NewUserDlgProc(HWND hwndDlg,
                     }
 
                     /* Store the user name */
-                    nLength = SendDlgItemMessage(hwndDlg, IDC_USER_NEW_NAME, WM_GETTEXTLENGTH, 0, 0);
-                    if (nLength > 0)
-                    {
-                        userInfo->usri3_name = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nLength + 1) * sizeof(WCHAR));
-                        GetDlgItemText(hwndDlg, IDC_USER_NEW_NAME, userInfo->usri3_name, nLength + 1);
-                    }
+                    userInfo->usri3_name = GetDlgItemTextAlloc(hwndDlg, IDC_USER_NEW_NAME);
 
                     /* Store the full user name */
-                    nLength = SendDlgItemMessage(hwndDlg, IDC_USER_NEW_FULL_NAME, WM_GETTEXTLENGTH, 0, 0);
-                    if (nLength > 0)
-                    {
-                        userInfo->usri3_full_name = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nLength + 1) * sizeof(WCHAR));
-                        GetDlgItemText(hwndDlg, IDC_USER_NEW_FULL_NAME, userInfo->usri3_full_name, nLength + 1);
-                    }
+                    userInfo->usri3_full_name = GetDlgItemTextAlloc(hwndDlg, IDC_USER_NEW_FULL_NAME);
 
                     /* Store the description */
-                    nLength = SendDlgItemMessage(hwndDlg, IDC_USER_NEW_DESCRIPTION, WM_GETTEXTLENGTH, 0, 0);
-                    if (nLength > 0)
-                    {
-                        userInfo->usri3_comment = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nLength + 1) * sizeof(WCHAR));
-                        GetDlgItemText(hwndDlg, IDC_USER_NEW_DESCRIPTION, userInfo->usri3_comment, nLength + 1);
-                    }
+                    userInfo->usri3_comment = GetDlgItemTextAlloc(hwndDlg, IDC_USER_NEW_DESCRIPTION);
 
                     /* Store the password */
-                    nLength = SendDlgItemMessage(hwndDlg, IDC_USER_NEW_PASSWORD1, WM_GETTEXTLENGTH, 0, 0);
-                    if (nLength > 0)
-                    {
-                        userInfo->usri3_password = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nLength + 1) * sizeof(WCHAR));
-                        GetDlgItemText(hwndDlg, IDC_USER_NEW_PASSWORD1, userInfo->usri3_password, nLength + 1);
-                    }
+                    userInfo->usri3_password = GetDlgItemTextAlloc(hwndDlg, IDC_USER_NEW_PASSWORD1);
 
                     EndDialog(hwndDlg, IDOK);
                     break;
@@ -351,17 +325,10 @@ UserNew(HWND hwndDlg)
                              user.usri3_comment);
     }
 
-    if (user.usri3_name)
-        HeapFree(GetProcessHeap(), 0, user.usri3_name);
-
-    if (user.usri3_full_name)
-        HeapFree(GetProcessHeap(), 0, user.usri3_full_name);
-
-    if (user.usri3_comment)
-        HeapFree(GetProcessHeap(), 0, user.usri3_comment);
-
-    if (user.usri3_password)
-        HeapFree(GetProcessHeap(), 0, user.usri3_password);
+    HeapFree(GetProcessHeap(), 0, user.usri3_name);
+    HeapFree(GetProcessHeap(), 0, user.usri3_full_name);
+    HeapFree(GetProcessHeap(), 0, user.usri3_comment);
+    HeapFree(GetProcessHeap(), 0, user.usri3_password);
 }
 
 
@@ -684,6 +651,44 @@ UpdateUserProperties(HWND hwndDlg)
     NetApiBufferFree(pUserInfo);
 }
 
+VOID OnToggleRequireLogon(_In_ HWND hwndDlg)
+{
+    HKEY hKey;
+    LONG lResult;
+    BOOL bIsChecked;
+    PCWSTR pszAutoAdminLogonValue;
+
+    lResult = RegCreateKeyExW(HKEY_LOCAL_MACHINE,
+                              L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+                              0,
+                              NULL,
+                              REG_OPTION_NON_VOLATILE,
+                              KEY_SET_VALUE,
+                              NULL,
+                              &hKey,
+                              NULL);
+    if (lResult != ERROR_SUCCESS)
+    {
+        ERR("OnToggleRequireLogon: Failed to open or create Winlogon registry key. Error code: %ld\n", lResult);
+        return; 
+    }
+
+    bIsChecked = IsDlgButtonChecked(hwndDlg, IDC_USERS_STARTUP_REQUIRE) == BST_CHECKED;
+    pszAutoAdminLogonValue = bIsChecked ? L"0" : L"1";
+
+    lResult = RegSetValueExW(hKey,
+                             L"AutoAdminLogon",
+                             0,
+                             REG_SZ, 
+                             (const BYTE*)pszAutoAdminLogonValue,
+                             2 * sizeof(WCHAR));
+    if (lResult != ERROR_SUCCESS)
+    {
+        ERR("OnToggleRequireLogon: Failed to set AutoAdminLogon registry value. Error code: %ld\n", lResult);
+    }
+
+    RegCloseKey(hKey);
+}
 
 INT_PTR CALLBACK
 UsersPageProc(HWND hwndDlg,
@@ -700,16 +705,50 @@ UsersPageProc(HWND hwndDlg,
     switch (uMsg)
     {
         case WM_INITDIALOG:
-            pUserData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(USER_DATA));
+        {
+            LONG lResult;
+            HKEY hKey;
+            WCHAR szAutoAdminLogonValue[2];
+            DWORD dwType;
+            DWORD dwSize = sizeof(szAutoAdminLogonValue);
+            BOOL bRequireLogon = TRUE;
+
+            pUserData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pUserData));
             SetWindowLongPtr(hwndDlg, DWLP_USER, (LONG_PTR)pUserData);
 
             pUserData->hPopupMenu = LoadMenu(hApplet, MAKEINTRESOURCE(IDM_POPUP_USER));
 
             OnInitDialog(hwndDlg);
+            lResult = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                                    L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+                                    0, KEY_READ, &hKey);
+            if (lResult != ERROR_SUCCESS)
+            {
+                CheckDlgButton(hwndDlg, IDC_USERS_STARTUP_REQUIRE, BST_CHECKED);
+                break; 
+            }
+
+            lResult = RegQueryValueExW(hKey,
+                                       L"AutoAdminLogon",
+                                       NULL,
+                                       &dwType,
+                                       (LPBYTE)szAutoAdminLogonValue,
+                                       &dwSize);
+            RegCloseKey(hKey);
+
+            if (lResult == ERROR_SUCCESS && dwType == REG_SZ &&
+                wcscmp(szAutoAdminLogonValue, L"1") == 0)
+            {
+                bRequireLogon = FALSE;
+            }
+
+            CheckDlgButton(hwndDlg, IDC_USERS_STARTUP_REQUIRE, bRequireLogon ? BST_CHECKED : BST_UNCHECKED);
+
             SetMenuDefaultItem(GetSubMenu(pUserData->hPopupMenu, 1),
                                IDM_USER_PROPERTIES,
                                FALSE);
             break;
+        }
 
         case WM_COMMAND:
             switch (LOWORD(wParam))
@@ -738,6 +777,9 @@ UsersPageProc(HWND hwndDlg,
                     {
                         UpdateUserProperties(hwndDlg);
                     }
+                    break;
+                case IDC_USERS_STARTUP_REQUIRE:
+                    OnToggleRequireLogon(hwndDlg);
                     break;
             }
             break;

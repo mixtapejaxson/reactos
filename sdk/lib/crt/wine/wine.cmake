@@ -10,6 +10,9 @@ if(ARCH STREQUAL "i386")
     list(APPEND CRT_WINE_SOURCE
         wine/except_i386.c
     )
+    list(APPEND CRT_WINE_ASM_SOURCE
+        wine/rosglue_i386.s
+    )
 elseif(ARCH STREQUAL "amd64")
     list(APPEND CRT_WINE_SOURCE
         wine/except_x86_64.c
@@ -25,6 +28,6 @@ elseif(ARCH STREQUAL "arm64")
 endif()
 
 # includes for wine code
-include_directories(${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
+include_directories(${REACTOS_SOURCE_DIR}/sdk/include/wine)
 
 #set_source_files_properties(${CRT_WINE_SOURCE} PROPERTIES INCLUDE_DIRECTORIES)

@@ -110,7 +110,7 @@ BEGIN
     IDS_CTRL_SHIFT "Ctrl+Shift"
     IDS_LEFT_ALT_SHIFT "Venstre Alt+Shift"
     IDS_SWITCH_BET_INLANG "Bytt mellom inndataspråk"
-    IDS_REBOOT_NOW, "Reboot now?"
+    IDS_REBOOT_NOW "You have to restart the system for the settings to take effect. Reboot now?"
 END
 
 STRINGTABLE
@@ -156,6 +156,7 @@ BEGIN
     IDS_CHINESE_TRADITIONAL_QUICK_LAYOUT "Chinese (Traditional) - Quick"
     IDS_CHINESE_TRADITIONAL_UNICODE_LAYOUT "Chinese (Traditional) - Unicode"
     IDS_CHINESE_TRADITIONAL_USKEYBOARD_LAYOUT "Chinese (Traditional) - US Keyboard"
+    IDS_COLEMAK_LAYOUT "Colemak"
     IDS_CROATIAN_LAYOUT "Croatian"
     IDS_CZECH_LAYOUT "Czech"
     IDS_CZECH_PROGRAMMERS_LAYOUT "Czech Programmers"
@@ -178,6 +179,8 @@ BEGIN
     IDS_GERMAN_IBM_LAYOUT "German (IBM)"
     IDS_GERMAN_NEO_11_LAYOUT "German (NEO-1.1)"
     IDS_GERMAN_RISTOME_LAYOUT "German (RISTOME)"
+    IDS_GERMAN_EXTENDED1_LAYOUT "German Extended (E1)"
+    IDS_GERMAN_EXTENDED2_LAYOUT "German Extended (E2)"
     IDS_GREEK_LAYOUT "Greek"
     IDS_GREEK_220_LAYOUT "Greek (220)"
     IDS_GREEK_220_LATIN_LAYOUT "Greek (220) Latin"
@@ -246,7 +249,7 @@ BEGIN
     IDS_UKRAINIAN_LAYOUT "Ukrainian"
     IDS_UKRAINIAN_STUDENT_LAYOUT "Ukrainian (Student)"
     IDS_UNITED_KINGDOM_LAYOUT "United Kingdom"
-    IDS_UNITED_STATES_DVIRAK_LAYOUT "United States-Dvorak"
+    IDS_UNITED_STATES_DVORAK_LAYOUT "United States-Dvorak"
     IDS_UNITED_STATES_DVORAK_FOR_LEFT_HAND_LAYOUT "United States-Dvorak for left hand"
     IDS_UNITED_STATES_DVORAK_FOR_RIGHT_HAND_LAYOUT "United States-Dvorak for right hand"
     IDS_UNITED_STATES_INTERNATIONAL_LAYOUT "United States-International"

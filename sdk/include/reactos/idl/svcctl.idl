@@ -876,14 +876,20 @@ interface svcctl
     /* Function 52 */
     DWORD
     __stdcall
-    RSendPnPMessage(
-        [in] handle_t BindingHandle); /* FIXME */
+    RI_ScSendPnPMessage(
+        [in] RPC_SERVICE_STATUS_HANDLE hServiceStatus,
+        [in] DWORD dwControl,
+        [in] DWORD dwEventType,
+        [in] DWORD dwEventSize,
+        [in, size_is(dwEventSize)] LPBYTE pEventData);
 
     /* Function 53 */
     DWORD
     __stdcall
-    RValidatePnPService(
-        [in] handle_t BindingHandle); /* FIXME */
+    RI_ScValidatePnPService(
+        [in] SC_RPC_HANDLE hService,
+        [in, string] LPWSTR pszServiceName,
+        [out] RPC_SERVICE_STATUS_HANDLE *phServiceStatus);
 
     /* Function 54 */
     DWORD

@@ -23,7 +23,7 @@
 extern "C" {
 #endif /* defined(__cplusplus) */
 
-inline ULONG
+static inline ULONG
 Win32DbgPrint(const char *filename, int line, const char *lpFormat, ...)
 {
     char szMsg[512];
@@ -63,13 +63,19 @@ Win32DbgPrint(const char *filename, int line, const char *lpFormat, ...)
 #   define IID_PPV_ARG(Itype, ppType) IID_##Itype, reinterpret_cast<void**>((static_cast<Itype**>(ppType)))
 #   define IID_NULL_PPV_ARG(Itype, ppType) IID_##Itype, NULL, reinterpret_cast<void**>((static_cast<Itype**>(ppType)))
 #else
-#   define IID_PPV_ARG(Itype, ppType) IID_##Itype, (void**)(ppType)
-#   define IID_NULL_PPV_ARG(Itype, ppType) IID_##Itype, NULL, (void**)(ppType)
+#   define IID_PPV_ARG(Itype, ppType) &IID_##Itype, (void**)(ppType)
+#   define IID_NULL_PPV_ARG(Itype, ppType) &IID_##Itype, NULL, (void**)(ppType)
 #endif
+
+static inline HRESULT HResultFromWin32(DWORD hr)
+{
+     // HRESULT_FROM_WIN32 will evaluate its parameter twice, this function will not.
+    return HRESULT_FROM_WIN32(hr);
+}
 
 #if 1
 
-inline BOOL _ROS_FAILED_HELPER(HRESULT hr, const char* expr, const char* filename, int line)
+static inline BOOL _ROS_FAILED_HELPER(HRESULT hr, const char* expr, const char* filename, int line)
 {
     if (FAILED(hr))
     {
@@ -88,7 +94,40 @@ inline BOOL _ROS_FAILED_HELPER(HRESULT hr, const char* expr, const char* filenam
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
 
+static inline UINT
+SHELL_ErrorBoxHelper(HWND hwndOwner, UINT Error)
+{
+    WCHAR buf[400];
+    UINT cch;
+
+    if (!IsWindowVisible(hwndOwner))
+        hwndOwner = NULL;
+    if (Error == ERROR_SUCCESS)
+        Error = ERROR_INTERNAL_ERROR;
+
+    cch = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                         NULL, Error, 0, buf, _countof(buf), NULL);
+    if (!cch)
+    {
+        enum { user32_IDS_ERROR = 2 }; // IDS_ERROR from user32 resource.h ("Error" string)
+        cch = LoadStringW(LoadLibraryW(L"USER32"), user32_IDS_ERROR, buf, _countof(buf));
+        wsprintfW(buf + cch, L"\n\n%#x (%d)", Error, Error);
+    }
+    MessageBoxW(hwndOwner, buf, NULL, MB_OK | MB_ICONSTOP);
+    return Error;
+}
 #ifdef __cplusplus
+template<class H> static UINT
+SHELL_ErrorBox(H hwndOwner, UINT Error = GetLastError())
+{
+    return SHELL_ErrorBoxHelper(const_cast<HWND>(hwndOwner), Error);
+}
+#else
+#define SHELL_ErrorBox SHELL_ErrorBoxHelper
+#endif
+
+#ifdef __cplusplus
+#ifdef DECLARE_CLASSFACTORY // ATL
 template <typename T>
 class CComCreatorCentralInstance
 {
@@ -221,25 +260,23 @@ public:
 #endif
 
 template<class T>
-void ReleaseCComPtrExpectZero(CComPtr<T>& cptr, BOOL forceRelease = FALSE)
+ULONG ReleaseCComPtrExpectZeroHelper(const char *file, UINT line, CComPtr<T>& cptr, BOOL forceRelease = FALSE)
 {
+    ULONG r = 0;
     if (cptr.p != NULL)
     {
         T *raw = cptr.Detach();
-        int nrc = raw->Release();
+        int nrc = r = raw->Release();
         if (nrc > 0)
+            Win32DbgPrint(file, line, "WARNING: Unexpected RefCount > 0 (%d)\n", nrc);
+        while (nrc > 0 && forceRelease)
         {
-            DbgPrint("WARNING: Unexpected RefCount > 0 (%d)!\n", nrc);
-            if (forceRelease)
-            {
-                while (nrc > 0)
-                {
-                    nrc = raw->Release();
-                }
-            }
+            nrc = raw->Release();
         }
     }
+    return r;
 }
+#define ReleaseCComPtrExpectZero(...) ReleaseCComPtrExpectZeroHelper(__FILE__, __LINE__, __VA_ARGS__)
 
 template<class T, class R>
 HRESULT inline ShellDebugObjectCreator(REFIID riid, R ** ppv)
@@ -254,6 +291,17 @@ HRESULT inline ShellDebugObjectCreator(REFIID riid, R ** ppv)
     if (obj.p == NULL)
         return E_OUTOFMEMORY;
     hResult = obj->QueryInterface(riid, reinterpret_cast<void **>(ppv));
+    if (FAILED(hResult))
+        return hResult;
+    return S_OK;
+}
+
+template<class T>
+HRESULT inline ShellObjectCreator(CComPtr<T> &objref)
+{
+    _CComObject<T> *pobj;
+    HRESULT hResult = _CComObject<T>::CreateInstance(&pobj);
+    objref = pobj; // AddRef() gets called here
     if (FAILED(hResult))
         return hResult;
     return S_OK;
@@ -409,6 +457,29 @@ HRESULT inline ShellObjectCreatorInit(T1 initArg1, T2 initArg2, T3 initArg3, T4 
 
     return hResult;
 }
+#endif // DECLARE_CLASSFACTORY (ATL)
+
+template<class P, class R> static HRESULT SHILClone(P pidl, R *ppOut)
+{
+    R r = *ppOut = (R)ILClone((PIDLIST_RELATIVE)pidl);
+    return r ? S_OK : E_OUTOFMEMORY;
+}
+
+template<class B, class R> static HRESULT SHILCombine(B base, PCUIDLIST_RELATIVE sub, R *ppOut)
+{
+    R r = *ppOut = (R)ILCombine((PCIDLIST_ABSOLUTE)base, sub);
+    return r ? S_OK : E_OUTOFMEMORY;
+}
+
+static inline bool StrIsNullOrEmpty(LPCSTR str) { return !str || !*str; }
+static inline bool StrIsNullOrEmpty(LPCWSTR str) { return !str || !*str; }
+
+HRESULT inline SHSetStrRetEmpty(LPSTRRET pStrRet)
+{
+    pStrRet->uType = STRRET_CSTR;
+    pStrRet->cStr[0] = '\0';
+    return S_OK;
+}
 
 HRESULT inline SHSetStrRet(LPSTRRET pStrRet, LPCSTR pstrValue)
 {
@@ -537,22 +608,68 @@ void DumpIdList(LPCITEMIDLIST pcidl)
     DbgPrint("End IDList Dump.\n");
 }
 
-struct CCoInit
+template <HRESULT (WINAPI *InitFunc)(void*), void (WINAPI *UninitFunc)()>
+struct CCoInitBase
 {
-    CCoInit()
-    {
-        hr = CoInitialize(NULL);
-    }
-    ~CCoInit()
+    HRESULT hr;
+    CCoInitBase() : hr(InitFunc(NULL)) { }
+    ~CCoInitBase()
     {
         if (SUCCEEDED(hr))
-        {
-            CoUninitialize();
-        }
+            UninitFunc();
     }
-    HRESULT hr;
+};
+typedef CCoInitBase<CoInitialize, CoUninitialize> CCoInit;
+typedef CCoInitBase<OleInitialize, OleUninitialize> COleInit;
+
+class CObjectWithSiteBase :
+    public IObjectWithSite
+{
+public:
+    IUnknown* m_pUnkSite;
+
+    CObjectWithSiteBase() : m_pUnkSite(NULL) {}
+    virtual ~CObjectWithSiteBase() { SetSite(NULL); }
+
+    // IObjectWithSite
+    STDMETHODIMP SetSite(IUnknown *pUnkSite) override
+    {
+#if defined(__WINE_SHLWAPI_H) && !defined(NO_SHLWAPI)
+        IUnknown_Set(&m_pUnkSite, pUnkSite);
+#else
+        IUnknown *punkOrg = m_pUnkSite;
+        if (punkOrg)
+            punkOrg->Release();
+        m_pUnkSite = pUnkSite;
+        if (pUnkSite)
+            pUnkSite->AddRef();
+#endif
+        return S_OK;
+    }
+    STDMETHODIMP GetSite(REFIID riid, void **ppvSite) override
+    {
+        *ppvSite = NULL;
+        return m_pUnkSite ? m_pUnkSite->QueryInterface(riid, ppvSite) : E_FAIL;
+    }
 };
 
+#if defined(_INC_SHLWAPI) && !defined(NO_SHLWAPI)
+struct CScopedSetObjectWithSite
+{
+    IUnknown *m_pObj;
+    explicit CScopedSetObjectWithSite(IUnknown *pObj, IUnknown *pSite) : m_pObj(pObj)
+    {
+        if (pSite)
+            IUnknown_SetSite(pObj, pSite);
+        else
+            m_pObj = NULL;
+    }
+    ~CScopedSetObjectWithSite()
+    {
+        IUnknown_SetSite(m_pObj, NULL);
+    }
+};
+#endif
 #endif /* __cplusplus */
 
 #define S_LESSTHAN 0xffff
@@ -560,6 +677,33 @@ struct CCoInit
 #define S_GREATERTHAN S_FALSE
 #define MAKE_COMPARE_HRESULT(x) ((x)>0 ? S_GREATERTHAN : ((x)<0 ? S_LESSTHAN : S_EQUAL))
 
+#ifdef _UNDOCSHELL_H
+/* The SEE_MASK_* defines that are undocumented, are defined in reactos/undocshell.h */
+#define SEE_CMIC_COMMON_BASICFLAGS (SEE_MASK_NOASYNC | SEE_MASK_ASYNCOK | SEE_MASK_UNICODE | \
+                                    SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI | SEE_MASK_FLAG_SEPVDM | \
+                                    SEE_MASK_FLAG_LOG_USAGE | SEE_MASK_NOZONECHECKS)
+#define SEE_CMIC_COMMON_FLAGS      (SEE_CMIC_COMMON_BASICFLAGS | SEE_MASK_HOTKEY | SEE_MASK_ICON | \
+                                    SEE_MASK_HASLINKNAME | SEE_MASK_HASTITLE)
+
+#define CmicFlagsToSeeFlags(flags)  ((flags) & SEE_CMIC_COMMON_FLAGS)
+static inline UINT SeeFlagsToCmicFlags(UINT flags)
+{
+    if ((flags & (SEE_MASK_CLASSNAME | SEE_MASK_CLASSKEY)) == SEE_MASK_CLASSNAME)
+        flags &= ~(SEE_MASK_HASLINKNAME | SEE_MASK_HASTITLE);
+    return flags & SEE_CMIC_COMMON_FLAGS;
+}
+#endif // _UNDOCSHELL_H
+
+static inline BOOL SHELL_IsContextMenuMsg(UINT uMsg)
+{
+    return uMsg == WM_MEASUREITEM || uMsg == WM_DRAWITEM ||
+           uMsg == WM_INITMENUPOPUP || uMsg == WM_MENUSELECT || uMsg == WM_MENUCHAR;
+}
+
+static inline BOOL ILIsSingle(LPCITEMIDLIST pidl)
+{
+    return pidl == ILFindLastID(pidl);
+}
 
 static inline PCUIDLIST_ABSOLUTE HIDA_GetPIDLFolder(CIDA const* pida)
 {
@@ -573,6 +717,19 @@ static inline PCUIDLIST_RELATIVE HIDA_GetPIDLItem(CIDA const* pida, SIZE_T i)
 
 
 #ifdef __cplusplus
+
+#if defined(CMIC_MASK_UNICODE) && defined(SEE_MASK_UNICODE)
+static inline bool IsUnicode(const CMINVOKECOMMANDINFOEX &ici)
+{
+    const UINT minsize = FIELD_OFFSET(CMINVOKECOMMANDINFOEX, ptInvoke);
+    return (ici.fMask & CMIC_MASK_UNICODE) && ici.cbSize >= minsize;
+}
+
+static inline bool IsUnicode(const CMINVOKECOMMANDINFO &ici)
+{
+    return IsUnicode(*(CMINVOKECOMMANDINFOEX*)&ici);
+}
+#endif // CMIC_MASK_UNICODE
 
 DECLSPEC_SELECTANY CLIPFORMAT g_cfHIDA = NULL;
 DECLSPEC_SELECTANY CLIPFORMAT g_cfShellIdListOffsets = NULL;
@@ -589,34 +746,40 @@ public:
     explicit CDataObjectHIDA(IDataObject* pDataObject)
         : m_cida(nullptr)
     {
-        m_medium.tymed = TYMED_NULL;
-
-        if (g_cfHIDA == NULL)
-        {
-            g_cfHIDA = (CLIPFORMAT)RegisterClipboardFormatW(CFSTR_SHELLIDLISTW);
-        }
-        FORMATETC fmt = { g_cfHIDA, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-
-        m_hr = pDataObject->GetData(&fmt, &m_medium);
-        if (FAILED(m_hr))
-        {
-            m_medium.tymed = TYMED_NULL;
-            return;
-        }
-
-        m_cida = (CIDA*)::GlobalLock(m_medium.hGlobal);
-        if (m_cida == nullptr)
-        {
-            m_hr = E_UNEXPECTED;
-        }
+        m_hr = CreateCIDA(pDataObject, &m_cida, m_medium);
     }
 
     ~CDataObjectHIDA()
     {
-        if (m_cida)
-            ::GlobalUnlock(m_cida);
+        DestroyCIDA(m_cida, m_medium);
+    }
 
-        ReleaseStgMedium(&m_medium);
+    static void DestroyCIDA(CIDA *pcida, STGMEDIUM &medium)
+    {
+        if (pcida)
+            ::GlobalUnlock(medium.hGlobal);
+        ReleaseStgMedium(&medium);
+    }
+
+    static HRESULT CreateCIDA(IDataObject* pDataObject, CIDA **ppcida, STGMEDIUM &medium)
+    {
+        *ppcida = NULL;
+        medium.pUnkForRelease = NULL;
+        if (g_cfHIDA == NULL)
+            g_cfHIDA = (CLIPFORMAT)RegisterClipboardFormatW(CFSTR_SHELLIDLISTW);
+        
+        FORMATETC fmt = { g_cfHIDA, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+        HRESULT hr = pDataObject->GetData(&fmt, &medium);
+        if (SUCCEEDED(hr))
+        {
+            *ppcida = (CIDA*)::GlobalLock(medium.hGlobal);
+            if (*ppcida)
+                return S_OK;
+            ReleaseStgMedium(&medium);
+            hr = E_UNEXPECTED;
+        }
+        medium.tymed = TYMED_NULL;
+        return hr;
     }
 
     HRESULT hr() const
@@ -725,7 +888,64 @@ DataObject_SetOffset(IDataObject* pDataObject, POINT* point)
     return DataObject_SetData(pDataObject, g_cfShellIdListOffsets, point, sizeof(point[0]));
 }
 
+#endif // __cplusplus
+
+#ifdef __cplusplus
+struct SHELL_GetSettingImpl
+{
+    SHELLSTATE ss;
+    SHELL_GetSettingImpl(DWORD ssf) { SHGetSetSettings(&ss, ssf, FALSE); }
+    const SHELLSTATE* operator ->() { return &ss; }
+};
+#define SHELL_GetSetting(ssf, field) ( SHELL_GetSettingImpl(ssf)->field )
+#else
+#define SHELL_GetSetting(pss, ssf, field) ( SHGetSetSettings((pss), (ssf), FALSE), (pss)->field )
 #endif
 
+static inline void DumpIdListOneLine(LPCITEMIDLIST pidl)
+{
+    char buf[1024], *data, drive = 0;
+    for (UINT depth = 0, type; ; pidl = ILGetNext(pidl), ++depth)
+    {
+        if (!pidl || !pidl->mkid.cb)
+        {
+            if (!depth)
+            {
+                wsprintfA(buf, "%p [] (%s)\n", pidl, pidl ? "Empty/Desktop" : "NULL");
+                OutputDebugStringA(buf);
+            }
+            break;
+        }
+        else if (!depth)
+        {
+            wsprintfA(buf, "%p", pidl);
+            OutputDebugStringA(buf);
+        }
+        type = pidl->mkid.abID[0] & 0x7f;
+        data = (char*)&pidl->mkid.abID[0];
+        if (depth == 0 && type == 0x1f && pidl->mkid.cb == 20 && *(UINT*)(&data[2]) == 0x20D04FE0)
+        {
+            wsprintfA(buf, " [%.2x ThisPC?]", type); /* "?" because we did not check the full GUID */
+        }
+        else if (depth == 1 && type >= 0x20 && type < 0x30 && type != 0x2E && pidl->mkid.cb > 4)
+        {
+            drive = data[1];
+            wsprintfA(buf, " [%.2x %c: %ub]", type, drive, pidl->mkid.cb);
+        }
+        else if (depth >= 2 && drive && (type & 0x70) == 0x30) /* PT_FS */
+        {
+            if (type & 4)
+                wsprintfA(buf, " [%.2x FS %.256ls %ub]", type, data + 12, pidl->mkid.cb);
+            else
+                wsprintfA(buf, " [%.2x FS %.256hs %ub]", type, data + 12, pidl->mkid.cb);
+        }
+        else
+        {
+            wsprintfA(buf, " [%.2x ? %ub]", type, pidl->mkid.cb);
+        }
+        OutputDebugStringA(buf);
+    }
+    OutputDebugStringA("\n");
+}
 
 #endif /* __ROS_SHELL_UTILS_H */

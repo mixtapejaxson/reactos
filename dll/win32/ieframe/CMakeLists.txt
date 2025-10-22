@@ -1,6 +1,5 @@
 
-include_directories(${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
-add_definitions(-D__WINESRC__)
+add_definitions(-D__ROS_LONG64__)
 spec2def(ieframe.dll ieframe.spec ADD_IMPORTLIB)
 
 list(APPEND SOURCE
@@ -13,6 +12,7 @@ list(APPEND SOURCE
     ieframe_main.c
     iehtmlwnd.c
     iexplore.c
+    inetfolder.c
     intshcut.c
     navigate.c
     oleobject.c
@@ -35,6 +35,8 @@ add_typelib(ieframe_v1.idl)
 list(APPEND ieframe_rc_deps
     ${CMAKE_CURRENT_SOURCE_DIR}/ieframe.rgs
     ${CMAKE_CURRENT_SOURCE_DIR}/ieframe_v1.rgs
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/ietoolbar.bmp
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/pages.ico
     ${CMAKE_CURRENT_BINARY_DIR}/ieframe_v1.tlb)
 
 set_source_files_properties(ieframe.rc PROPERTIES OBJECT_DEPENDS "${ieframe_rc_deps}")
@@ -44,3 +46,4 @@ target_link_libraries(ieframe uuid wine)
 add_importlibs(ieframe urlmon shell32 comctl32 shlwapi oleaut32 ole32 user32 gdi32 advapi32 msvcrt kernel32 ntdll)
 add_pch(ieframe precomp.h SOURCE)
 add_cd_file(TARGET ieframe DESTINATION reactos/system32 FOR all)
+set_wine_module_FIXME(ieframe) # CORE-5743: No CONST_VTABLE

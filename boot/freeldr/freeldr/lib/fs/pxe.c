@@ -1,6 +1,6 @@
 /*
  *  FreeLoader
- *  Copyright (C) 2011  Hervé Poussineau
+ *  Copyright (C) 2011  HervÃ© Poussineau
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -94,7 +94,7 @@ BOOLEAN CallPxe(UINT16 Service, PVOID Parameter)
     if (Service != PXENV_TFTP_READ)
     {
         // HACK: this delay shouldn't be necessary
-        KeStallExecutionProcessor(100 * 1000); // 100 ms
+        StallExecutionProcessor(100 * 1000); // 100 ms
         TRACE("PxeCall(0x%x, %p)\n", Service, Parameter);
     }
 
@@ -131,12 +131,33 @@ static ARC_STATUS PxeClose(ULONG FileId)
 
 static ARC_STATUS PxeGetFileInformation(ULONG FileId, FILEINFORMATION* Information)
 {
+    PCSTR FileName;
+
     if (_OpenFile == NO_FILE || FileId != _OpenFile)
         return EBADF;
 
     RtlZeroMemory(Information, sizeof(*Information));
     Information->EndingAddress.LowPart = _FileSize;
     Information->CurrentAddress.LowPart = _FilePosition;
+
+    Information->Type = NetworkPeripheral;
+
+    /* Set the ARC file attributes */
+    Information->Attributes = ReadOnlyFile;
+
+    /* Search for the last path separator. Slashes are used as separators,
+     * for supporting TFTP servers on POSIX systems (see PxeOpen()) */
+    FileName = strrchr(_OpenFileName, '/');
+    if (FileName)
+        ++FileName; // Go past it.
+    else
+        FileName = _OpenFileName; // No separator: file name without directory.
+
+    /* Copy the file name, perhaps truncated, and NUL-terminated */
+    Information->FileNameLength = (ULONG)strlen(FileName);
+    Information->FileNameLength = min(Information->FileNameLength, sizeof(Information->FileName) - 1);
+    RtlCopyMemory(Information->FileName, FileName, Information->FileNameLength);
+    Information->FileName[Information->FileNameLength] = ANSI_NULL;
 
     TRACE("PxeGetFileInformation(%lu) -> FileSize = %lu, FilePointer = 0x%lx\n",
           FileId, Information->EndingAddress.LowPart, Information->CurrentAddress.LowPart);
@@ -155,10 +176,19 @@ static ARC_STATUS PxeOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
     if (OpenMode != OpenReadOnly)
         return EACCES;
 
-    /* Retrieve the path length without NULL terminator */
-    PathLen = (Path ? min(strlen(Path), sizeof(_OpenFileName) - 1) : 0);
+    /* Skip leading path separator, if any, so as to ensure that
+     * we always lookup the file at the root of the TFTP server's
+     * file space ("virtual root"), even if the server doesn't
+     * support this, and NOT from the root of the file system. */
+    if (*Path == '\\' || *Path == '/')
+        ++Path;
 
-    /* Lowercase the path and always use slashes as separators */
+    /* Retrieve the path length without NULL terminator */
+    PathLen = strlen(Path);
+    PathLen = min(PathLen, sizeof(_OpenFileName) - 1);
+
+    /* Lowercase the path and always use slashes as separators,
+     * for supporting TFTP servers on POSIX systems */
     for (i = 0; i < PathLen; i++)
     {
         if (Path[i] == '\\')

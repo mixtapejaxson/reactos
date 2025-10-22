@@ -3,7 +3,7 @@
  * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
  * PURPOSE:     Xbox specific disk access routines
  * COPYRIGHT:   Copyright 2004 Gé van Geldorp (gvg@reactos.com)
- *              Copyright 2019 Dmitry Borisov (di.sean@protonmail.com)
+ *              Copyright 2019-2025 Dmitry Borisov (di.sean@protonmail.com)
  */
 
 /* INCLUDES *******************************************************************/
@@ -22,39 +22,36 @@ static BOOLEAN AtaInitialized = FALSE;
 
 /* FUNCTIONS ******************************************************************/
 
+static
 VOID
-XboxDiskInit(BOOLEAN Init)
+XboxDiskInit(VOID)
 {
     UCHAR DetectedCount;
     UCHAR UnitNumber;
     PDEVICE_UNIT DeviceUnit = NULL;
 
-    if (Init & !AtaInitialized)
+    ASSERT(!AtaInitialized);
+
+    AtaInitialized = TRUE;
+
+    /* Find first HDD and CD */
+    AtaInit(&DetectedCount);
+    for (UnitNumber = 0; UnitNumber <= DetectedCount; UnitNumber++)
     {
-        /* Find first HDD and CD */
-        AtaInit(&DetectedCount);
-        for (UnitNumber = 0; UnitNumber <= DetectedCount; UnitNumber++)
+        DeviceUnit = AtaGetDevice(UnitNumber);
+        if (DeviceUnit)
         {
-            DeviceUnit = AtaGetDevice(UnitNumber);
-            if (DeviceUnit)
+            if (DeviceUnit->Flags & ATA_DEVICE_ATAPI)
             {
-                if (DeviceUnit->Flags & ATA_DEVICE_ATAPI)
-                {
-                    if (!CdDrive)
-                        CdDrive = DeviceUnit;
-                }
-                else
-                {
-                    if (!HardDrive)
-                        HardDrive = DeviceUnit;
-                }
+                if (!CdDrive)
+                    CdDrive = DeviceUnit;
+            }
+            else
+            {
+                if (!HardDrive)
+                    HardDrive = DeviceUnit;
             }
         }
-        AtaInitialized = TRUE;
-    }
-    else
-    {
-        AtaFree();
     }
 }
 
@@ -67,7 +64,7 @@ XboxDiskDriveNumberToDeviceUnit(UCHAR DriveNumber)
         return NULL;
 
     if (!AtaInitialized)
-        XboxDiskInit(TRUE);
+        XboxDiskInit();
 
     /* HDD */
     if ((DriveNumber == 0x80) && HardDrive)
@@ -80,6 +77,22 @@ XboxDiskDriveNumberToDeviceUnit(UCHAR DriveNumber)
     return NULL;
 }
 
+CONFIGURATION_TYPE
+DiskGetConfigType(
+    _In_ UCHAR DriveNumber)
+{
+    PDEVICE_UNIT DeviceUnit;
+
+    DeviceUnit = XboxDiskDriveNumberToDeviceUnit(DriveNumber);
+    if (!DeviceUnit)
+        return -1; // MaximumType;
+
+    if (DeviceUnit == CdDrive) // (DeviceUnit->Flags & ATA_DEVICE_ATAPI)
+        return CdromController;
+    else // if (DeviceUnit == HardDrive)
+        return DiskPeripheral;
+}
+
 BOOLEAN
 XboxDiskReadLogicalSectors(
     IN UCHAR DriveNumber,
@@ -89,14 +102,14 @@ XboxDiskReadLogicalSectors(
 {
     PDEVICE_UNIT DeviceUnit;
 
-    TRACE("XboxDiskReadLogicalSectors() DriveNumber: 0x%x SectorNumber: %I64d SectorCount: %d Buffer: 0x%x\n",
+    TRACE("XboxDiskReadLogicalSectors() DriveNumber: 0x%x SectorNumber: %I64u SectorCount: %u Buffer: 0x%x\n",
           DriveNumber, SectorNumber, SectorCount, Buffer);
 
     DeviceUnit = XboxDiskDriveNumberToDeviceUnit(DriveNumber);
     if (!DeviceUnit)
         return FALSE;
 
-    return AtaAtapiReadLogicalSectorsLBA(DeviceUnit, SectorNumber, SectorCount, Buffer);
+    return AtaReadLogicalSectors(DeviceUnit, SectorNumber, SectorCount, Buffer);
 }
 
 BOOLEAN
@@ -112,8 +125,9 @@ XboxDiskGetDriveGeometry(UCHAR DriveNumber, PGEOMETRY Geometry)
 
     Geometry->Cylinders = DeviceUnit->Cylinders;
     Geometry->Heads = DeviceUnit->Heads;
-    Geometry->Sectors = DeviceUnit->Sectors;
+    Geometry->SectorsPerTrack = DeviceUnit->SectorsPerTrack;
     Geometry->BytesPerSector = DeviceUnit->SectorSize;
+    Geometry->Sectors = DeviceUnit->TotalSectors;
 
     return TRUE;
 }
@@ -134,7 +148,7 @@ XboxDiskGetCacheableBlockCount(UCHAR DriveNumber)
     if (DeviceUnit->Flags & ATA_DEVICE_LBA)
         return 64;
     else
-        return DeviceUnit->Sectors;
+        return DeviceUnit->SectorsPerTrack;
 }
 
 /* EOF */

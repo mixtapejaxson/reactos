@@ -2,7 +2,7 @@
  *  FreeLoader
  *
  *  Copyright (C) 2003, 2004  Eric Kohl
- *  Copyright (C) 2009  Hervé Poussineau
+ *  Copyright (C) 2009  HervÃ© Poussineau
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,9 +28,13 @@ DBG_DEFAULT_CHANNEL(HWDETECT);
  * This is the common code for harddisk for both the PC and the XBOX.
  */
 
+#define FIRST_BIOS_DISK 0x80
+#define FIRST_PARTITION 1
+
 typedef struct tagDISKCONTEXT
 {
     UCHAR DriveNumber;
+    BOOLEAN IsFloppy;
     ULONG SectorSize;
     ULONGLONG SectorOffset;
     ULONGLONG SectorCount;
@@ -74,6 +78,8 @@ DiskGetFileInformation(ULONG FileId, FILEINFORMATION* Information)
     Information->EndingAddress.QuadPart   = (Context->SectorOffset + Context->SectorCount) * Context->SectorSize;
     Information->CurrentAddress.QuadPart  = Context->SectorNumber * Context->SectorSize;
 
+    Information->Type = (Context->IsFloppy ? FloppyDiskPeripheral : DiskPeripheral);
+
     return ESUCCESS;
 }
 
@@ -81,6 +87,7 @@ static ARC_STATUS
 DiskOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
 {
     DISKCONTEXT* Context;
+    CONFIGURATION_TYPE DriveType;
     UCHAR DriveNumber;
     ULONG DrivePartition, SectorSize;
     ULONGLONG SectorOffset = 0;
@@ -97,19 +104,16 @@ DiskOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
     if (!DissectArcPath(Path, NULL, &DriveNumber, &DrivePartition))
         return EINVAL;
 
-    if (DrivePartition == 0xff)
+    DriveType = DiskGetConfigType(DriveNumber);
+    if (DriveType == CdromController)
     {
         /* This is a CD-ROM device */
         SectorSize = 2048;
     }
     else
     {
-        /*
-         * This is either a floppy disk device (DrivePartition == 0) or
-         * a hard disk device (DrivePartition != 0 && DrivePartition != 0xFF)
-         * but it doesn't matter which one because they both have 512 bytes
-         * per sector.
-         */
+        /* This is either a floppy disk or a hard disk device, but it doesn't
+         * matter which one because they both have 512 bytes per sector */
         SectorSize = 512;
     }
 
@@ -134,7 +138,7 @@ DiskOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
         }
 
         SectorOffset = 0;
-        SectorCount = (ULONGLONG)Geometry.Cylinders * Geometry.Heads * Geometry.Sectors;
+        SectorCount = Geometry.Sectors;
     }
 
     Context = FrLdrTempAlloc(sizeof(DISKCONTEXT), TAG_HW_DISK_CONTEXT);
@@ -142,6 +146,7 @@ DiskOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
         return ENOMEM;
 
     Context->DriveNumber = DriveNumber;
+    Context->IsFloppy = (DriveType == FloppyDiskPeripheral);
     Context->SectorSize = SectorSize;
     Context->SectorOffset = SectorOffset;
     Context->SectorCount = SectorCount;
@@ -248,7 +253,7 @@ static const DEVVTBL DiskVtbl =
 PCHAR
 GetHarddiskIdentifier(UCHAR DriveNumber)
 {
-    return PcDiskIdentifier[DriveNumber - 0x80];
+    return PcDiskIdentifier[DriveNumber - FIRST_BIOS_DISK];
 }
 
 static VOID
@@ -262,7 +267,7 @@ GetHarddiskInformation(UCHAR DriveNumber)
     BOOLEAN ValidPartitionTable;
     CHAR ArcName[MAX_PATH];
     PARTITION_TABLE_ENTRY PartitionTableEntry;
-    PCHAR Identifier = PcDiskIdentifier[DriveNumber - 0x80];
+    PCHAR Identifier = PcDiskIdentifier[DriveNumber - FIRST_BIOS_DISK];
 
     /* Detect disk partition type */
     DiskDetectPartitionType(DriveNumber);
@@ -272,7 +277,7 @@ GetHarddiskInformation(UCHAR DriveNumber)
     {
         ERR("Reading MBR failed\n");
         /* We failed, use a default identifier */
-        sprintf(Identifier, "BIOSDISK%d", DriveNumber - 0x80 + 1);
+        sprintf(Identifier, "BIOSDISK%d", DriveNumber - FIRST_BIOS_DISK + 1);
         return;
     }
 
@@ -294,20 +299,20 @@ GetHarddiskInformation(UCHAR DriveNumber)
     ValidPartitionTable = (Mbr->MasterBootRecordMagic == 0xAA55);
 
     /* Fill out the ARC disk block */
-    sprintf(ArcName, "multi(0)disk(0)rdisk(%u)", DriveNumber - 0x80);
+    sprintf(ArcName, "multi(0)disk(0)rdisk(%u)", DriveNumber - FIRST_BIOS_DISK);
     AddReactOSArcDiskInfo(ArcName, Signature, Checksum, ValidPartitionTable);
 
-    sprintf(ArcName, "multi(0)disk(0)rdisk(%u)partition(0)", DriveNumber - 0x80);
+    sprintf(ArcName, "multi(0)disk(0)rdisk(%u)partition(0)", DriveNumber - FIRST_BIOS_DISK);
     FsRegisterDevice(ArcName, &DiskVtbl);
 
     /* Add partitions */
-    i = 1;
+    i = FIRST_PARTITION;
     DiskReportError(FALSE);
     while (DiskGetPartitionEntry(DriveNumber, i, &PartitionTableEntry))
     {
         if (PartitionTableEntry.SystemIndicator != PARTITION_ENTRY_UNUSED)
         {
-            sprintf(ArcName, "multi(0)disk(0)rdisk(%u)partition(%lu)", DriveNumber - 0x80, i);
+            sprintf(ArcName, "multi(0)disk(0)rdisk(%u)partition(%lu)", DriveNumber - FIRST_BIOS_DISK, i);
             FsRegisterDevice(ArcName, &DiskVtbl);
         }
         i++;
@@ -350,7 +355,7 @@ EnumerateHarddisks(OUT PBOOLEAN BootDriveReported)
     /* Count the number of visible harddisk drives */
     DiskReportError(FALSE);
     DiskCount = 0;
-    DriveNumber = 0x80;
+    DriveNumber = FIRST_BIOS_DISK;
 
     ASSERT(DiskReadBufferSize > 0);
 
@@ -396,23 +401,6 @@ EnumerateHarddisks(OUT PBOOLEAN BootDriveReported)
     return DiskCount;
 }
 
-// FIXME: Copied from pcdisk.c
-// Actually this function is REALLY PC-specific!!
-static BOOLEAN
-DiskIsDriveRemovable(UCHAR DriveNumber)
-{
-    /*
-     * Hard disks use drive numbers >= 0x80 . So if the drive number
-     * indicates a hard disk then return FALSE.
-     * 0x49 is our magic ramdisk drive, so return FALSE for that too.
-     */
-    if ((DriveNumber >= 0x80) || (DriveNumber == 0x49))
-        return FALSE;
-
-    /* The drive is a floppy diskette so return TRUE */
-    return TRUE;
-}
-
 static BOOLEAN
 DiskGetBootPath(BOOLEAN IsPxe)
 {
@@ -432,7 +420,7 @@ DiskGetBootPath(BOOLEAN IsPxe)
         // RtlStringCbPrintfA(FrLdrBootPath, sizeof(FrLdrBootPath), "ramdisk(%u)", 0);
         RtlStringCbCopyA(FrLdrBootPath, sizeof(FrLdrBootPath), "ramdisk(0)");
     }
-    else if (FrldrBootDrive < 0x80)
+    else if (FrldrBootDrive < FIRST_BIOS_DISK)
     {
         /* This is a floppy */
         RtlStringCbPrintfA(FrLdrBootPath, sizeof(FrLdrBootPath),
@@ -442,7 +430,7 @@ DiskGetBootPath(BOOLEAN IsPxe)
     {
         /* Boot Partition 0xFF is the magic value that indicates booting from CD-ROM (see isoboot.S) */
         RtlStringCbPrintfA(FrLdrBootPath, sizeof(FrLdrBootPath),
-                           "multi(0)disk(0)cdrom(%u)", FrldrBootDrive - 0x80);
+                           "multi(0)disk(0)cdrom(%u)", FrldrBootDrive - FIRST_BIOS_DISK);
     }
     else
     {
@@ -460,7 +448,7 @@ DiskGetBootPath(BOOLEAN IsPxe)
 
         RtlStringCbPrintfA(FrLdrBootPath, sizeof(FrLdrBootPath),
                            "multi(0)disk(0)rdisk(%u)partition(%lu)",
-                           FrldrBootDrive - 0x80, FrldrBootPartition);
+                           FrldrBootDrive - FIRST_BIOS_DISK, FrldrBootPartition);
     }
 
     return TRUE;
@@ -471,23 +459,25 @@ PcInitializeBootDevices(VOID)
 {
     UCHAR DiskCount;
     BOOLEAN BootDriveReported = FALSE;
-    ULONG i;
+    CONFIGURATION_TYPE DriveType;
 
     DiskCount = EnumerateHarddisks(&BootDriveReported);
 
     /* Initialize FrLdrBootPath, the boot path we're booting from (the "SystemPartition") */
     DiskGetBootPath(PxeInit());
 
-    /* Add it, if it's a floppy or cdrom */
-    if ((FrldrBootDrive >= 0x80 && !BootDriveReported) ||
-        DiskIsDriveRemovable(FrldrBootDrive))
+    /* Add it, if it's a floppy or CD-ROM */
+    DriveType = DiskGetConfigType(FrldrBootDrive);
+    if ((FrldrBootDrive >= FIRST_BIOS_DISK && !BootDriveReported) ||
+        (DriveType == FloppyDiskPeripheral || DriveType == CdromController))
     {
-        /* TODO: Check if it's really a CDROM drive */
+        /* TODO: Check if it's really a CD-ROM drive */
 
         PMASTER_BOOT_RECORD Mbr;
         PULONG Buffer;
         ULONG Checksum = 0;
         ULONG Signature;
+        ULONG i;
 
         /* Read the MBR */
         if (!MachDiskReadLogicalSectors(FrldrBootDrive, 16ULL, 1, DiskReadBuffer))

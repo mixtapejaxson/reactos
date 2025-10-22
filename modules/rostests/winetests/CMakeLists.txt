@@ -1,6 +1,4 @@
 
-add_definitions(-D__ROS_LONG64__)
-
 if(MSVC)
     add_compile_options(
         /wd4090 # C4090: 'function': different 'const' qualifiers
@@ -115,6 +113,7 @@ add_subdirectory(spoolss)
 add_subdirectory(sti)
 add_subdirectory(sxs)
 add_subdirectory(twain_32)
+add_subdirectory(ucrtbase)
 add_subdirectory(urlmon)
 add_subdirectory(user32)
 add_subdirectory(userenv)

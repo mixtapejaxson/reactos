@@ -147,7 +147,7 @@ LoadLibraryA(LPCSTR lpLibFileName)
     }
 
     /* Call the Ex version of the API */
-    return LoadLibraryExA(lpLibFileName, 0, 0);
+    return LoadLibraryExA(lpLibFileName, NULL, 0);
 }
 
 /*
@@ -179,7 +179,7 @@ DECLSPEC_HOTPATCH
 LoadLibraryW(LPCWSTR lpLibFileName)
 {
     /* Call Ex version of the API */
-    return LoadLibraryExW(lpLibFileName, 0, 0);
+    return LoadLibraryExW(lpLibFileName, NULL, 0);
 }
 
 
@@ -657,7 +657,7 @@ GetModuleFileNameW(HINSTANCE hModule,
     } _SEH2_END
 
     /* Release the loader lock */
-    LdrUnlockLoaderLock(LDR_LOCK_LOADER_LOCK_FLAG_RAISE_ON_ERRORS, Cookie);
+    LdrUnlockLoaderLock(LDR_UNLOCK_LOADER_LOCK_FLAG_RAISE_ON_ERRORS, Cookie);
 
     return Length / sizeof(WCHAR);
 }

@@ -36,11 +36,8 @@ KeContextToTrapFrame(IN PCONTEXT Context,
     if (ContextFlags & CONTEXT_INTEGER)
     {
         TrapFrame->Rax = Context->Rax;
-        TrapFrame->Rbx = Context->Rbx;
         TrapFrame->Rcx = Context->Rcx;
         TrapFrame->Rdx = Context->Rdx;
-        TrapFrame->Rsi = Context->Rsi;
-        TrapFrame->Rdi = Context->Rdi;
         TrapFrame->Rbp = Context->Rbp;
         TrapFrame->R8 = Context->R8;
         TrapFrame->R9 = Context->R9;
@@ -48,6 +45,9 @@ KeContextToTrapFrame(IN PCONTEXT Context,
         TrapFrame->R11 = Context->R11;
         if (ExceptionFrame)
         {
+            ExceptionFrame->Rbx = Context->Rbx;
+            ExceptionFrame->Rsi = Context->Rsi;
+            ExceptionFrame->Rdi = Context->Rdi;
             ExceptionFrame->R12 = Context->R12;
             ExceptionFrame->R13 = Context->R13;
             ExceptionFrame->R14 = Context->R14;
@@ -290,6 +290,28 @@ KeTrapFrameToContext(IN PKTRAP_FRAME TrapFrame,
 
     /* Restore IRQL */
     if (OldIrql < APC_LEVEL) KeLowerIrql(OldIrql);
+}
+
+VOID
+RtlGetUnwindContext(
+    _Out_ PCONTEXT Context,
+    _In_ DWORD64 TargetFrame);
+
+VOID
+KiGetTrapContextInternal(
+    _In_ PKTRAP_FRAME TrapFrame,
+    _Out_ PCONTEXT Context)
+{
+    ULONG64 TargetFrame;
+
+    /* Get the volatile register context from the trap frame */
+    KeTrapFrameToContext(TrapFrame, NULL, Context);
+
+    /* The target frame is MAX_SYSCALL_PARAM_SIZE bytes before the trap frame */
+    TargetFrame = (ULONG64)TrapFrame - MAX_SYSCALL_PARAM_SIZE;
+
+    /* Get the nonvolatiles on the stack */
+    RtlGetUnwindContext(Context, TargetFrame);
 }
 
 VOID

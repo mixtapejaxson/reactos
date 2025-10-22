@@ -228,6 +228,7 @@ typedef struct _PROCMARKHEAD
 } PROCMARKHEAD, *PPROCMARKHEAD;
 
 #define UserHMGetHandle(obj) ((obj)->head.h)
+#define UserHMSetHandle(obj, handle) ((obj)->head.h = (handle))
 
 /* Window Client Information structure */
 struct _ETHREAD;
@@ -302,8 +303,12 @@ typedef struct _CALLBACKWND
 #define CI_INITTHREAD        0x00000008
 #define CI_CURTHPRHOOK       0x00000010
 #define CI_CLASSESREGISTERED 0x00000020
-#define CI_IMMACTIVATE       0x00000040
-#define CI_TFSDISABLED       0x00000400
+#define CI_IMMACTIVATE       0x00000040 /* IMM/IME (Asian input) */
+#define CI_CTFCOINIT         0x00000080 /* Did CTF CoInitialize? */
+#define CI_CTFTIM            0x00000100 /* CTF Thread Input Manager (TIM) */
+#define CI_CICERO_STARTED    0x00000200 /* Is Cicero started in the thread? */
+#define CI_TSFDISABLED       0x00000400 /* TSF (Text Services Framework a.k.a. Cicero) */
+#define CI_AIMMACTIVATED     0x00000800 /* Active IMM (AIMM) */
 
 /*
  * CLIENTINFO structure.
@@ -943,7 +948,7 @@ typedef LONG_PTR
 #define SRVINFO_DBCSENABLED 0x0002
 #define SRVINFO_IMM32       0x0004
 #define SRVINFO_APIHOOK     0x0010
-#define SRVINFO_CICERO_ENABLED 0x0020
+#define SRVINFO_CTFIME_ENABLED 0x0020
 #define SRVINFO_KBDPREF     0x0080
 
 #define NUM_SYSCOLORS 31
@@ -1201,36 +1206,14 @@ typedef struct tagCURSORDATA
 #define CURSORF_LINKED       0x0100
 #define CURSORF_CURRENT      0x0200
 
-typedef struct tagIMEINFOEX
-{
-    HKL hkl;
-    IMEINFO ImeInfo;
-    WCHAR wszUIClass[16];
-    ULONG fdwInitConvMode;
-    INT fInitOpen;
-    INT fLoadFlag;
-    DWORD dwProdVersion;
-    DWORD dwImeWinVersion;
-    WCHAR wszImeDescription[50];
-    WCHAR wszImeFile[80];
-    struct
-    {
-        INT fSysWow64Only:1;
-        INT fCUASLayer:1;
-    };
-} IMEINFOEX, *PIMEINFOEX;
+/* Flags for dwCompatFlags2 */
+#define COMPAT_FLAG_2_CICERO_DISABLED 2
 
-typedef enum IMEINFOEXCLASS
-{
-    ImeInfoExKeyboardLayout,
-    ImeInfoExKeyboardLayoutTFS,
-    ImeInfoExImeWindow,
-    ImeInfoExImeFileName
-} IMEINFOEXCLASS;
-
-#define IS_IME_HKL(hkl) ((((ULONG_PTR)(hkl)) & 0xF0000000) == 0xE0000000)
 #define IS_IMM_MODE() (gpsi && (gpsi->dwSRVIFlags & SRVINFO_IMM32))
-#define IS_CICERO_MODE() (gpsi && (gpsi->dwSRVIFlags & SRVINFO_CICERO_ENABLED))
+#define IS_CICERO_MODE() (gpsi && (gpsi->dwSRVIFlags & SRVINFO_CTFIME_ENABLED))
+#define IS_16BIT_MODE() (GetWin32ClientInfo()->dwTIFlags & TIF_16BIT)
+#define IS_CICERO_COMPAT_DISABLED() \
+    (GetWin32ClientInfo()->dwCompatFlags2 & COMPAT_FLAG_2_CICERO_DISABLED)
 
 typedef struct tagIMEUI
 {
@@ -1252,121 +1235,31 @@ typedef struct tagIMEUI
     DWORD dwLastStatus;
 } IMEUI, *PIMEUI;
 
-/* Window Extra data container. */
-typedef struct _IMEWND
+typedef struct tagIMEWND
 {
     WND wnd;
     PIMEUI pimeui;
 } IMEWND, *PIMEWND;
 
-typedef struct tagTRANSMSG
-{
-    UINT message;
-    WPARAM wParam;
-    LPARAM lParam;
-} TRANSMSG, *PTRANSMSG, *LPTRANSMSG;
+#define GWLP_IMEWND_PIMEUI 0
 
-typedef struct tagTRANSMSGLIST
-{
-    UINT     uMsgCount;
-    TRANSMSG TransMsg[ANYSIZE_ARRAY];
-} TRANSMSGLIST, *PTRANSMSGLIST, *LPTRANSMSGLIST;
-
-#define DEFINE_IME_ENTRY(type, name, params, extended) typedef type (WINAPI *FN_##name) params;
-#include "imetable.h"
-#undef DEFINE_IME_ENTRY
-
-typedef struct IMEDPI
-{
-    struct IMEDPI *pNext;
-    HINSTANCE      hInst;
-    HKL            hKL;
-    IMEINFO        ImeInfo;
-    UINT           uCodePage;
-    WCHAR          szUIClass[16];
-    DWORD          cLockObj;
-    DWORD          dwFlags;
-#define DEFINE_IME_ENTRY(type, name, params, extended) FN_##name name;
-#include "imetable.h"
-#undef DEFINE_IME_ENTRY
-} IMEDPI, *PIMEDPI;
-
-#ifndef _WIN64
-C_ASSERT(offsetof(IMEDPI, pNext) == 0x0);
-C_ASSERT(offsetof(IMEDPI, hInst) == 0x4);
-C_ASSERT(offsetof(IMEDPI, hKL) == 0x8);
-C_ASSERT(offsetof(IMEDPI, ImeInfo) == 0xc);
-C_ASSERT(offsetof(IMEDPI, uCodePage) == 0x28);
-C_ASSERT(offsetof(IMEDPI, szUIClass) == 0x2c);
-C_ASSERT(offsetof(IMEDPI, cLockObj) == 0x4c);
-C_ASSERT(offsetof(IMEDPI, dwFlags) == 0x50);
-C_ASSERT(offsetof(IMEDPI, ImeInquire) == 0x54);
-C_ASSERT(offsetof(IMEDPI, ImeConversionList) == 0x58);
-C_ASSERT(offsetof(IMEDPI, ImeRegisterWord) == 0x5c);
-C_ASSERT(offsetof(IMEDPI, ImeUnregisterWord) == 0x60);
-C_ASSERT(offsetof(IMEDPI, ImeGetRegisterWordStyle) == 0x64);
-C_ASSERT(offsetof(IMEDPI, ImeEnumRegisterWord) == 0x68);
-C_ASSERT(offsetof(IMEDPI, ImeConfigure) == 0x6c);
-C_ASSERT(offsetof(IMEDPI, ImeDestroy) == 0x70);
-C_ASSERT(offsetof(IMEDPI, ImeEscape) == 0x74);
-C_ASSERT(offsetof(IMEDPI, ImeProcessKey) == 0x78);
-C_ASSERT(offsetof(IMEDPI, ImeSelect) == 0x7c);
-C_ASSERT(offsetof(IMEDPI, ImeSetActiveContext) == 0x80);
-C_ASSERT(offsetof(IMEDPI, ImeToAsciiEx) == 0x84);
-C_ASSERT(offsetof(IMEDPI, NotifyIME) == 0x88);
-C_ASSERT(offsetof(IMEDPI, ImeSetCompositionString) == 0x8c);
-C_ASSERT(offsetof(IMEDPI, ImeGetImeMenuItems) == 0x90);
-C_ASSERT(offsetof(IMEDPI, CtfImeInquireExW) == 0x94);
-C_ASSERT(offsetof(IMEDPI, CtfImeSelectEx) == 0x98);
-C_ASSERT(offsetof(IMEDPI, CtfImeEscapeEx) == 0x9c);
-C_ASSERT(offsetof(IMEDPI, CtfImeGetGuidAtom) == 0xa0);
-C_ASSERT(offsetof(IMEDPI, CtfImeIsGuidMapEnable) == 0xa4);
-C_ASSERT(sizeof(IMEDPI) == 0xa8);
-#endif
-
-/* flags for IMEDPI.dwFlags */
-#define IMEDPI_FLAG_UNLOADED 0x1
-#define IMEDPI_FLAG_LOCKED 0x2
-
-/* unconfirmed */
-typedef struct tagCLIENTIMC
-{
-    HANDLE hInputContext;   /* LocalAlloc'ed LHND */
-    LONG cLockObj;
-    DWORD dwFlags;
-    DWORD dwCompatFlags;
-    RTL_CRITICAL_SECTION cs;
-    UINT uCodePage;
-    HKL hKL;
-    BOOL bUnknown4;
-} CLIENTIMC, *PCLIENTIMC;
-
-#ifndef _WIN64
-C_ASSERT(offsetof(CLIENTIMC, hInputContext) == 0x0);
-C_ASSERT(offsetof(CLIENTIMC, cLockObj) == 0x4);
-C_ASSERT(offsetof(CLIENTIMC, dwFlags) == 0x8);
-C_ASSERT(offsetof(CLIENTIMC, dwCompatFlags) == 0xc);
-C_ASSERT(offsetof(CLIENTIMC, cs) == 0x10);
-C_ASSERT(offsetof(CLIENTIMC, uCodePage) == 0x28);
-C_ASSERT(offsetof(CLIENTIMC, hKL) == 0x2c);
-C_ASSERT(sizeof(CLIENTIMC) == 0x34);
-#endif
-
-/* flags for CLIENTIMC */
-#define CLIENTIMC_WIDE 0x1
-#define CLIENTIMC_ACTIVE 0x2
-#define CLIENTIMC_UNKNOWN4 0x20
-#define CLIENTIMC_DESTROY 0x40
-#define CLIENTIMC_DISABLEIME 0x80
-#define CLIENTIMC_UNKNOWN2 0x100
+/* IMEWND and GWLP_IMEWND_PIMEUI assume this alignment */
+C_ASSERT(sizeof(WND) % sizeof(PVOID) == 0);
 
 DWORD
 NTAPI
-NtUserAssociateInputContext(HWND hWnd, HIMC hIMC, DWORD dwFlags);
+NtUserAssociateInputContext(
+    _In_ HWND hWnd,
+    _In_opt_ HIMC hIMC,
+    _In_ DWORD dwFlags);
 
 NTSTATUS
 NTAPI
-NtUserBuildHimcList(DWORD dwThreadId, DWORD dwCount, HIMC *phList, LPDWORD pdwCount);
+NtUserBuildHimcList(
+    _In_ DWORD dwThreadId,
+    _In_ DWORD dwCount,
+    _Out_ HIMC *phList,
+    _Out_ PDWORD pdwCount);
 
 DWORD
 NTAPI
@@ -1536,12 +1429,12 @@ NtUserThunkedMenuItemInfo(
 BOOL
 NTAPI
 NtUserTrackPopupMenuEx(
-    HMENU hmenu,
-    UINT fuFlags,
-    int x,
-    int y,
-    HWND hwnd,
-    LPTPMPARAMS lptpm);
+    _In_ HMENU hMenu,
+    _In_ UINT fuFlags,
+    _In_ INT x,
+    _In_ INT y,
+    _In_ HWND hwnd,
+    _In_opt_ LPTPMPARAMS lptpm);
 
 HKL
 NTAPI
@@ -1793,7 +1686,7 @@ enum SimpleCallRoutines
     TWOPARAM_ROUTINE_WOWCLEANUP
 };
 
-DWORD
+DWORD_PTR
 NTAPI
 NtUserCallHwnd(
     HWND hWnd,
@@ -1886,8 +1779,8 @@ NtUserCheckWindowThreadDesktop(
 DWORD
 NTAPI
 NtUserCheckImeHotKey(
-    UINT uVirtualKey,
-    LPARAM lParam);
+    _In_ UINT uVirtualKey,
+    _In_ LPARAM lParam);
 
 HWND NTAPI
 NtUserChildWindowFromPointEx(
@@ -1979,7 +1872,7 @@ NtUserCreateDesktop(
 
 HIMC
 NTAPI
-NtUserCreateInputContext(ULONG_PTR dwClientImcData);
+NtUserCreateInputContext(_In_ ULONG_PTR dwClientImcData);
 
 NTSTATUS
 NTAPI
@@ -2073,7 +1966,7 @@ NtUserDestroyCursor(
 
 BOOL
 NTAPI
-NtUserDestroyInputContext(HIMC hIMC);
+NtUserDestroyInputContext(_In_ HIMC hIMC);
 
 BOOLEAN
 NTAPI
@@ -2083,7 +1976,7 @@ NtUserDestroyWindow(
 BOOL
 NTAPI
 NtUserDisableThreadIme(
-    DWORD dwThreadID);
+    _In_ DWORD dwThreadID);
 
 LRESULT
 NTAPI
@@ -2261,12 +2154,12 @@ NtUserGetAltTabInfo(
 HWND
 NTAPI
 NtUserGetAncestor(
-    HWND hWnd,
-    UINT Flags);
+    _In_ HWND hWnd,
+    _In_ UINT uType);
 
 DWORD
 NTAPI
-NtUserGetAppImeLevel(HWND hWnd);
+NtUserGetAppImeLevel(_In_ HWND hWnd);
 
 SHORT
 NTAPI
@@ -2430,16 +2323,17 @@ NtUserGetIconSize(
 
 BOOL
 NTAPI
-NtUserGetImeHotKey(DWORD dwHotKeyId,
-                   LPUINT lpuModifiers,
-                   LPUINT lpuVirtualKey,
-                   LPHKL lphKL);
+NtUserGetImeHotKey(
+    _In_ DWORD dwHotKeyId,
+    _Out_ PUINT lpuModifiers,
+    _Out_ PUINT lpuVirtualKey,
+    _Out_ LPHKL lphKL);
 
 BOOL
 NTAPI
 NtUserGetImeInfoEx(
-    PIMEINFOEX pImeInfoEx,
-    IMEINFOEXCLASS SearchType);
+    _Inout_ PIMEINFOEX pImeInfoEx,
+    _In_ IMEINFOEXCLASS SearchType);
 
 DWORD
 NTAPI
@@ -2608,7 +2502,7 @@ enum ThreadStateRoutines
     THREADSTATE_IMECOMPATFLAGS,
     THREADSTATE_OLDKEYBOARDLAYOUT,
     THREADSTATE_ISWINLOGON,
-    THREADSTATE_ISWINLOGON2,
+    THREADSTATE_UNKNOWN_0x10,
     THREADSTATE_CHECKCONIME,
     THREADSTATE_GETTHREADINFO,
     THREADSTATE_PROGMANWINDOW, /* FIXME: Delete this HACK */
@@ -2821,7 +2715,10 @@ NtUserMoveWindow(
 
 DWORD
 NTAPI
-NtUserNotifyIMEStatus(HWND hwnd, BOOL fOpen, DWORD dwConversion);
+NtUserNotifyIMEStatus(
+    _In_ HWND hwnd,
+    _In_ BOOL fOpen,
+    _In_ DWORD dwConversion);
 
 BOOL
 NTAPI
@@ -3138,11 +3035,22 @@ NtUserSetCapture(
 ULONG_PTR
 NTAPI
 NtUserSetClassLong(
-    HWND hWnd,
-    INT Offset,
-    ULONG_PTR dwNewLong,
-    BOOL Ansi);
+    _In_ HWND hWnd,
+    _In_ INT Offset,
+    _In_ ULONG dwNewLong,
+    _In_ BOOL Ansi);
 
+#ifdef _WIN64
+
+ULONG_PTR
+APIENTRY
+NtUserSetClassLongPtr(
+    _In_ HWND hWnd,
+    _In_ INT Offset,
+    _In_ ULONG_PTR dwNewLong,
+    _In_ BOOL Ansi);
+
+#endif // _WIN64
 WORD
 NTAPI
 NtUserSetClassWord(
@@ -3227,20 +3135,20 @@ NtUserSetFocus(
 BOOL
 NTAPI
 NtUserSetImeHotKey(
-    DWORD dwHotKeyId,
-    UINT uModifiers,
-    UINT uVirtualKey,
-    HKL hKL,
-    DWORD dwAction);
+    _In_ DWORD dwHotKeyId,
+    _In_ UINT uModifiers,
+    _In_ UINT uVirtualKey,
+    _In_ HKL hKL,
+    _In_ DWORD dwAction);
 
 BOOL
 NTAPI
 NtUserSetImeInfoEx(
-    PIMEINFOEX pImeInfoEx);
+    _In_ const IMEINFOEX *pImeInfoEx);
 
 BOOL
 NTAPI
-NtUserSetImeOwnerWindow(HWND hImeWnd, HWND hwndFocus);
+NtUserSetImeOwnerWindow(_In_ HWND hImeWnd, _In_opt_ HWND hwndFocus);
 
 DWORD
 NTAPI
@@ -3364,7 +3272,9 @@ NtUserSetSystemTimer(
 
 DWORD
 NTAPI
-NtUserSetThreadLayoutHandles(HKL hNewKL, HKL hOldKL);
+NtUserSetThreadLayoutHandles(
+    _In_ HKL hNewKL,
+    _In_ HKL hOldKL);
 
 UINT_PTR
 NTAPI
@@ -3717,20 +3627,20 @@ NtUserGetMonitorInfo(
 HMONITOR
 NTAPI
 NtUserMonitorFromPoint(
-    IN POINT point,
-    IN DWORD dwFlags);
+    _In_ POINT point,
+    _In_ DWORD dwFlags);
 
 HMONITOR
 NTAPI
 NtUserMonitorFromRect(
-    IN LPCRECT pRect,
-    IN DWORD dwFlags);
+    _In_ LPCRECT pRect,
+    _In_ DWORD dwFlags);
 
 HMONITOR
 NTAPI
 NtUserMonitorFromWindow(
-    IN HWND hWnd,
-    IN DWORD dwFlags);
+    _In_ HWND hWnd,
+    _In_ DWORD dwFlags);
 
 typedef struct _SETSCROLLBARINFO
 {
@@ -3745,6 +3655,9 @@ NtUserSetScrollBarInfo(
     HWND hwnd,
     LONG idObject,
     SETSCROLLBARINFO *info);
+
+ULONG
+RtlGetExpWinVer(_In_ PVOID BaseAddress);
 
 #endif /* __WIN32K_NTUSER_H */
 

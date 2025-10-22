@@ -1,5 +1,4 @@
 
-include_directories(${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
 include_directories(${REACTOS_SOURCE_DIR}/sdk/lib/conutils)
 
 list(APPEND SOURCE
@@ -44,7 +43,6 @@ list(APPEND SOURCE
     prompt.c
     redir.c
     ren.c
-    replace.c
     screen.c
     set.c
     setlocal.c
@@ -54,6 +52,7 @@ list(APPEND SOURCE
     time.c
     timer.c
     title.c
+    trace.c
     type.c
     ver.c
     verify.c

@@ -8,14 +8,6 @@
 #ifndef _COM_APITEST_H_
 #define _COM_APITEST_H_
 
-/* Define this if you're adding new classes - the test will auto-generate the
- * interface table entries for you ;) */
-//#define GENERATE_TABLE_ENTRIES
-
-/* Define this to make wrong interface offsets count as test failures...
- * we usually don't want to be that strict */
-//#define FAIL_WRONG_OFFSET
-
 #define WIN32_NO_STATUS
 #define _INC_WINDOWS
 #define COM_NO_WINDOWS_H
@@ -41,23 +33,30 @@
 #include <htiface.h>
 #include <mshtml.h>
 #include <initguid.h>
+#include <apitest.h>
 
 typedef IUnknown *PUNKNOWN;
+
+/* Uncomment this if you want to log the offsets of COM interfaces. */
+// #define LOG_COM_INTERFACE_OFFSETS
 
 typedef struct _CLASS_AND_INTERFACES
 {
     const CLSID *clsid;
     PCSTR name;
+    ULONG MinClassNTDDIVersion;
+    ULONG MaxClassNTDDIVersion;
     struct
     {
-        LONG offset;
+        ULONG MinInterfaceNTDDIVersion;
+        ULONG MaxInterfaceNTDDIVersion;
         const IID *iid;
     } ifaces[80];
     PCWSTR ThreadingModel;
 } CLASS_AND_INTERFACES;
 typedef const CLASS_AND_INTERFACES *PCCLASS_AND_INTERFACES;
 
-#define ID_NAME(c) &c, #c
+#define ID_NAME(c, minc, maxc) &c, #c, minc, maxc
 
 VOID
 TestClasses(
@@ -65,9 +64,14 @@ TestClasses(
     _In_ PCCLASS_AND_INTERFACES ExpectedInterfaces,
     _In_ INT ExpectedInterfaceCount);
 
-/* Indicate that the interface is implemented in another (probably aggregate) object,
- * so its offset varies and is "far away" */
-#define FARAWY (-65535)
+VOID
+TestClassesEx(
+    _In_ PCWSTR ModuleName,
+    _In_ PCCLASS_AND_INTERFACES ExpectedInterfaces,
+    _In_ INT ExpectedInterfaceCount,
+    _In_ ULONG MinimumNTDDIVersion,
+    _In_ ULONG MaximumNTDDIVersion,
+    _In_ BOOLEAN IsWinRT);
 
 // TODO: fix our headers... we really shouldn't need these here
 DEFINE_GUID(CLSID_AugmentedShellFolder,    0x91ea3f8b, 0xc99b, 0x11d0, 0x98, 0x15, 0x00, 0xc0, 0x4f, 0xd9, 0x19, 0x72);
@@ -87,6 +91,7 @@ DEFINE_GUID(CLSID_ImgCtxThumbnailExtractor,0x7376d660, 0xc583, 0x11d0, 0xa3, 0xa
 DEFINE_GUID(CLSID_MenuDeskBar,             0xECD4FC4F, 0x521C, 0x11D0, 0xB7, 0x92, 0x00, 0xA0, 0xC9, 0x03, 0x12, 0xE1);
 DEFINE_GUID(CLSID_MenuToolbarBase,         0x40b96610, 0xb522, 0x11d1, 0xb3, 0xb4, 0x00, 0xaa, 0x00, 0x6e, 0xfd, 0xe7);
 DEFINE_GUID(CLSID_MruLongList,             0x53BD6B4E, 0x3780, 0x4693, 0xAF, 0xC3, 0x71, 0x61, 0xC2, 0xF3, 0xEE, 0x9C);
+DEFINE_GUID(CLSID_MruPidlList,             0x42AEDC87, 0x2188, 0x41FD, 0xB9, 0xA3, 0x0C, 0x96, 0x6F, 0xEA, 0xBE, 0xC1);
 DEFINE_GUID(CLSID_QuickLinks,              0x0E5CBF21, 0xD15F, 0x11D0, 0x83, 0x01, 0x00, 0xAA, 0x00, 0x5B, 0x43, 0x83);
 DEFINE_GUID(CLSID_ShellFolderView,         0x62112aa1, 0xebe4, 0x11cf, 0xa5, 0xfb, 0x00, 0x20, 0xaf, 0xe7, 0x29, 0x2d);
 DEFINE_GUID(CLSID_ShellImageDataFactory,   0x66e4e4fb, 0xf385, 0x4dd0, 0x8d, 0x74, 0xa2, 0xef, 0xd1, 0xbc, 0x61, 0x78);
@@ -142,6 +147,8 @@ DEFINE_GUID(IID_IHWEventHandler,           0xc1fb73d0, 0xec3a, 0x4ba2, 0xb5, 0x1
 DEFINE_GUID(IID_IHWEventHandler2,          0xcfcc809f, 0x295d, 0x42e8, 0x9f, 0xfc, 0x42, 0x4b, 0x33, 0xc4, 0x87, 0xe6);
 DEFINE_GUID(IID_IInitializeWithBindCtx,    0x71c0d2bc, 0x726d, 0x45cc, 0xa6, 0xc0, 0x2e, 0x31, 0xc1, 0xdb, 0x21, 0x59);
 DEFINE_GUID(IID_IItemNameLimits,           0x1df0d7f1, 0xb267, 0x4d28, 0x8b, 0x10, 0x12, 0xe2, 0x32, 0x02, 0xa5, 0xc4);
+DEFINE_GUID(IID_IMruPidlList,              0x47851649, 0xa2ef, 0x4e67, 0xba, 0xec, 0xc6, 0xa1, 0x53, 0xac, 0x72, 0xec);
+DEFINE_GUID(IID_IMruDataList,              0xFE787BCB, 0x0EE8, 0x44FB, 0x8C, 0x89, 0x12, 0xF5, 0x08, 0x91, 0x3C, 0x40);
 DEFINE_GUID(IID_IMultiMonitorDockingSite,  0x03879de0, 0xa205, 0x11d0, 0x99, 0xcb, 0x00, 0xc0, 0x4f, 0xd6, 0x55, 0xe1);
 DEFINE_GUID(IID_INamespaceWalk,            0x57ced8a7, 0x3f4a, 0x432c, 0x93, 0x50, 0x30, 0xf2, 0x44, 0x83, 0xf7, 0x4f);
 DEFINE_GUID(IID_INamespaceWalkCB,          0xd92995f8, 0xcf5e, 0x4a76, 0xbf, 0x59, 0xea, 0xd3, 0x9e, 0xa2, 0xb9, 0x7e);
@@ -216,7 +223,7 @@ DEFINE_GUID(IID_IImageList_mmc,            0x43136eb8, 0xd36c, 0x11cf, 0xad, 0xb
 DEFINE_GUID(IID_IConsoleVerb,              0xe49f7a60, 0x74af, 0x11d0, 0xa2, 0x86, 0x00, 0xc0, 0x4f, 0xd8, 0xfe, 0x93);
 DEFINE_GUID(IID_ISnapInAbout,              0x1245208c, 0xa151, 0x11d0, 0xa7, 0xd7, 0x00, 0xc0, 0x4f, 0xd9, 0x09, 0xdd);
 
-
+DEFINE_GUID(IID_INetConnectionCommonUi2,   0xC08956A6, 0x1CD3, 0x11D1, 0xB1, 0xC5, 0x00, 0x80, 0x5F, 0xC1, 0x27, 0x0E); // Same as IID_INetLanConnectionUiInfo
 
 #endif /* _COM_APITEST_H_ */
 

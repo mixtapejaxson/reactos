@@ -1,7 +1,13 @@
 
-include_directories(BEFORE ${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
+add_definitions(-D__ROS_LONG64__)
+
+include_directories(BEFORE ${REACTOS_SOURCE_DIR}/sdk/include/wine)
 remove_definitions(-DWINVER=0x502 -D_WIN32_IE=0x600 -D_WIN32_WINNT=0x502)
 add_definitions(-DWINVER=0x600 -D_WIN32_WINNT=0x601)
+
+add_definitions(
+    -Dstrcasecmp=_stricmp
+)
 
 list(APPEND SOURCE
     actctx.c

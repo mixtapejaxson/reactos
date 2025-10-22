@@ -96,6 +96,12 @@
 #define CMP_ENLIST_KCB_LOCKED_EXCLUSIVE                 0x2
 
 //
+// CmpBuildAndLockKcbArray & CmpLockKcbArray Flags
+//
+#define CMP_LOCK_KCB_ARRAY_EXCLUSIVE                    0x1
+#define CMP_LOCK_KCB_ARRAY_SHARED                       0x2
+
+//
 // Unload Flags
 //
 #define CMP_UNLOCK_KCB_LOCKED                    0x1
@@ -118,6 +124,12 @@
     ((PAGE_SIZE - FIELD_OFFSET(CM_ALLOC_PAGE, AllocPage)) / sizeof(CM_KEY_CONTROL_BLOCK))
 #define CM_DELAYS_PER_PAGE                              \
     ((PAGE_SIZE - FIELD_OFFSET(CM_ALLOC_PAGE, AllocPage)) / sizeof(CM_DELAY_ALLOC))
+
+//
+// Cache Lookup & KCB Array constructs
+//
+#define CMP_SUBKEY_LEVELS_DEPTH_LIMIT   32
+#define CMP_KCBS_IN_ARRAY_LIMIT         (CMP_SUBKEY_LEVELS_DEPTH_LIMIT + 2)
 
 //
 // Value Search Results
@@ -148,6 +160,9 @@ typedef struct _CM_KEY_HASH_TABLE_ENTRY
     EX_PUSH_LOCK Lock;
     PKTHREAD Owner;
     PCM_KEY_HASH Entry;
+#if DBG
+    PVOID LockBackTrace[5];
+#endif
 } CM_KEY_HASH_TABLE_ENTRY, *PCM_KEY_HASH_TABLE_ENTRY;
 
 //
@@ -223,6 +238,9 @@ typedef struct _CM_KEY_BODY
     struct _CM_NOTIFY_BLOCK *NotifyBlock;
     HANDLE ProcessID;
     LIST_ENTRY KeyBodyList;
+
+    /* ReactOS specific -- boolean flag to avoid recursive locking of the KCB */
+    BOOLEAN KcbLocked;
 } CM_KEY_BODY, *PCM_KEY_BODY;
 
 //
@@ -403,6 +421,15 @@ typedef struct _HIVE_LIST_ENTRY
 } HIVE_LIST_ENTRY, *PHIVE_LIST_ENTRY;
 
 //
+// Hash Cache Stack
+//
+typedef struct _CM_HASH_CACHE_STACK
+{
+    UNICODE_STRING NameOfKey;
+    ULONG ConvKey;
+} CM_HASH_CACHE_STACK, *PCM_HASH_CACHE_STACK;
+
+//
 // Parse context for Key Object
 //
 typedef struct _CM_PARSE_CONTEXT
@@ -487,6 +514,15 @@ CmpDestroyHiveViewList(
 );
 
 //
+// Security Management Functions
+//
+NTSTATUS
+CmpAssignSecurityDescriptor(
+    IN PCM_KEY_CONTROL_BLOCK Kcb,
+    IN PSECURITY_DESCRIPTOR SecurityDescriptor
+);
+
+//
 // Security Cache Functions
 //
 VOID
@@ -560,16 +596,6 @@ CmpCompareNewValueDataAgainstKCBCache(
     IN ULONG Type,
     IN PVOID Data,
     IN ULONG DataSize
-);
-
-//
-// Registry Validation Functions
-//
-ULONG
-NTAPI
-CmCheckRegistry(
-    IN PCMHIVE Hive,
-    IN ULONG Flags
 );
 
 //
@@ -724,16 +750,17 @@ CmpQueryKeyName(
 NTSTATUS
 NTAPI
 CmpInitializeHive(
-    OUT PCMHIVE *CmHive,
-    IN ULONG OperationType,
-    IN ULONG HiveFlags,
-    IN ULONG FileType,
-    IN PVOID HiveData OPTIONAL,
-    IN HANDLE Primary,
-    IN HANDLE Log,
-    IN HANDLE External,
-    IN PCUNICODE_STRING FileName OPTIONAL,
-    IN ULONG CheckFlags
+    _Out_ PCMHIVE *CmHive,
+    _In_ ULONG OperationType,
+    _In_ ULONG HiveFlags,
+    _In_ ULONG FileType,
+    _In_opt_ PVOID HiveData,
+    _In_ HANDLE Primary,
+    _In_ HANDLE Log,
+    _In_ HANDLE External,
+    _In_ HANDLE Alternate,
+    _In_opt_ PCUNICODE_STRING FileName,
+    _In_ ULONG CheckFlags
 );
 
 NTSTATUS
@@ -994,6 +1021,22 @@ DelistKeyBodyFromKCB(
 );
 
 VOID
+CmpUnLockKcbArray(
+    _In_ PULONG LockedKcbs
+);
+
+PULONG
+NTAPI
+CmpBuildAndLockKcbArray(
+    _In_ PCM_HASH_CACHE_STACK HashCacheStack,
+    _In_ ULONG KcbLockFlags,
+    _In_ PCM_KEY_CONTROL_BLOCK Kcb,
+    _Inout_ PULONG OuterStackArray,
+    _In_ ULONG TotalRemainingSubkeys,
+    _In_ ULONG MatchRemainSubkeyLevel
+);
+
+VOID
 NTAPI
 CmpAcquireTwoKcbLocksExclusiveByKey(
     IN ULONG ConvKey1,
@@ -1089,6 +1132,7 @@ CmpCreateLinkNode(
     IN ULONG CreateOptions,
     IN PCM_PARSE_CONTEXT Context,
     IN PCM_KEY_CONTROL_BLOCK ParentKcb,
+    IN PULONG KcbsLocked,
     OUT PVOID *Object
 );
 
@@ -1186,10 +1230,10 @@ CmpFileWrite(
 BOOLEAN
 NTAPI
 CmpFileSetSize(
-    IN PHHIVE RegistryHive,
-    IN ULONG FileType,
-    IN ULONG FileSize,
-    IN ULONG OldFileSize
+    _In_ PHHIVE RegistryHive,
+    _In_ ULONG FileType,
+    _In_ ULONG FileSize,
+    _In_ ULONG OldFileSize
 );
 
 BOOLEAN
@@ -1285,16 +1329,16 @@ CmLoadKey(
 NTSTATUS
 NTAPI
 CmUnloadKey(
-    IN PCM_KEY_CONTROL_BLOCK Kcb,
-    IN ULONG Flags
+    _In_ PCM_KEY_CONTROL_BLOCK Kcb,
+    _In_ ULONG Flags
 );
 
 ULONG
 NTAPI
 CmpEnumerateOpenSubKeys(
-    IN PCM_KEY_CONTROL_BLOCK RootKcb,
-    IN BOOLEAN RemoveEmptyCacheEntries,
-    IN BOOLEAN DereferenceOpenedEntries
+    _In_ PCM_KEY_CONTROL_BLOCK RootKcb,
+    _In_ BOOLEAN RemoveEmptyCacheEntries,
+    _In_ BOOLEAN DereferenceOpenedEntries
 );
 
 HCELL_INDEX
@@ -1376,6 +1420,7 @@ CmGetSystemDriverList(
 extern ULONG CmpTraceLevel;
 extern BOOLEAN CmpSpecialBootCondition;
 extern BOOLEAN CmpFlushOnLockRelease;
+extern ULONG CmpVolatileBoot;
 extern BOOLEAN CmpShareSystemHives;
 extern BOOLEAN CmpMiniNTBoot;
 extern BOOLEAN CmpNoVolatileCreates;
@@ -1408,14 +1453,14 @@ extern HIVE_LIST_ENTRY CmpMachineHiveList[];
 extern UNICODE_STRING CmSymbolicLinkValueName;
 extern UNICODE_STRING CmpSystemStartOptions;
 extern UNICODE_STRING CmpLoadOptions;
-extern BOOLEAN CmSelfHeal;
-extern BOOLEAN CmpSelfHeal;
 extern ULONG CmpBootType;
+extern ULONG CmSelfHeal;
+extern BOOLEAN CmpSelfHeal;
 extern HANDLE CmpRegistryRootHandle;
 extern BOOLEAN ExpInTextModeSetup;
 extern BOOLEAN InitIsWinPEMode;
 extern ULONG CmpHashTableSize;
-extern ULONG CmpDelayedCloseSize, CmpDelayedCloseIndex;
+extern ULONG CmpDelayedCloseSize;
 extern BOOLEAN CmpNoWrite;
 extern BOOLEAN CmpForceForceFlush;
 extern BOOLEAN CmpWasSetupBoot;
@@ -1423,6 +1468,9 @@ extern BOOLEAN CmpProfileLoaded;
 extern PCMHIVE CmiVolatileHive;
 extern LIST_ENTRY CmiKeyObjectListHead;
 extern BOOLEAN CmpHoldLazyFlush;
+extern ULONG CmpLazyFlushIntervalInSeconds;
+extern ULONG CmpLazyFlushHiveCount;
+extern BOOLEAN HvShutdownComplete;
 
 //
 // Inlined functions

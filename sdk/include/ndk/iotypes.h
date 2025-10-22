@@ -151,6 +151,7 @@ extern POBJECT_TYPE NTSYSAPI IoDriverObjectType;
 #define DOE_REMOVE_PENDING                      0x4
 #define DOE_REMOVE_PROCESSED                    0x8
 #define DOE_START_PENDING                       0x10
+#define DOE_DEFAULT_SD_PRESENT                  0x800
 
 //
 // Device Object StartIo Flags
@@ -278,69 +279,219 @@ typedef enum _BUS_DATA_TYPE
     MaximumBusDataType
 } BUS_DATA_TYPE, *PBUS_DATA_TYPE;
 
+#if defined(NT_PROCESSOR_GROUPS)
+
+typedef USHORT IRQ_DEVICE_POLICY, *PIRQ_DEVICE_POLICY;
+
+enum _IRQ_DEVICE_POLICY_USHORT {
+  IrqPolicyMachineDefault = 0,
+  IrqPolicyAllCloseProcessors = 1,
+  IrqPolicyOneCloseProcessor = 2,
+  IrqPolicyAllProcessorsInMachine = 3,
+  IrqPolicyAllProcessorsInGroup = 3,
+  IrqPolicySpecifiedProcessors = 4,
+  IrqPolicySpreadMessagesAcrossAllProcessors = 5};
+
+#else /* defined(NT_PROCESSOR_GROUPS) */
+
+typedef enum _IRQ_DEVICE_POLICY {
+  IrqPolicyMachineDefault = 0,
+  IrqPolicyAllCloseProcessors,
+  IrqPolicyOneCloseProcessor,
+  IrqPolicyAllProcessorsInMachine,
+  IrqPolicySpecifiedProcessors,
+  IrqPolicySpreadMessagesAcrossAllProcessors
+} IRQ_DEVICE_POLICY, *PIRQ_DEVICE_POLICY;
+
+#endif
+
+typedef enum _IRQ_PRIORITY {
+  IrqPriorityUndefined = 0,
+  IrqPriorityLow,
+  IrqPriorityNormal,
+  IrqPriorityHigh
+} IRQ_PRIORITY, *PIRQ_PRIORITY;
+
+#define IO_RESOURCE_PREFERRED             0x01
+#define IO_RESOURCE_DEFAULT               0x02
+#define IO_RESOURCE_ALTERNATIVE           0x08
+
+typedef struct _IO_RESOURCE_DESCRIPTOR {
+  UCHAR Option;
+  UCHAR Type;
+  UCHAR ShareDisposition;
+  UCHAR Spare1;
+  USHORT Flags;
+  USHORT Spare2;
+  union {
+    struct {
+      ULONG Length;
+      ULONG Alignment;
+      PHYSICAL_ADDRESS MinimumAddress;
+      PHYSICAL_ADDRESS MaximumAddress;
+    } Port;
+    struct {
+      ULONG Length;
+      ULONG Alignment;
+      PHYSICAL_ADDRESS MinimumAddress;
+      PHYSICAL_ADDRESS MaximumAddress;
+    } Memory;
+    struct {
+      ULONG MinimumVector;
+      ULONG MaximumVector;
+#if defined(NT_PROCESSOR_GROUPS)
+      IRQ_DEVICE_POLICY AffinityPolicy;
+      USHORT Group;
+#else
+      IRQ_DEVICE_POLICY AffinityPolicy;
+#endif
+      IRQ_PRIORITY PriorityPolicy;
+      KAFFINITY TargetedProcessors;
+    } Interrupt;
+    struct {
+      ULONG MinimumChannel;
+      ULONG MaximumChannel;
+    } Dma;
+    struct {
+      ULONG Length;
+      ULONG Alignment;
+      PHYSICAL_ADDRESS MinimumAddress;
+      PHYSICAL_ADDRESS MaximumAddress;
+    } Generic;
+    struct {
+      ULONG Data[3];
+    } DevicePrivate;
+    struct {
+      ULONG Length;
+      ULONG MinBusNumber;
+      ULONG MaxBusNumber;
+      ULONG Reserved;
+    } BusNumber;
+    struct {
+      ULONG Priority;
+      ULONG Reserved1;
+      ULONG Reserved2;
+    } ConfigData;
+  } u;
+} IO_RESOURCE_DESCRIPTOR, *PIO_RESOURCE_DESCRIPTOR;
+
+typedef struct _IO_RESOURCE_LIST {
+  USHORT Version;
+  USHORT Revision;
+  ULONG Count;
+  IO_RESOURCE_DESCRIPTOR Descriptors[1];
+} IO_RESOURCE_LIST, *PIO_RESOURCE_LIST;
+
+typedef struct _IO_RESOURCE_REQUIREMENTS_LIST {
+  ULONG ListSize;
+  INTERFACE_TYPE InterfaceType;
+  ULONG BusNumber;
+  ULONG SlotNumber;
+  ULONG Reserved[3];
+  ULONG AlternativeLists;
+  IO_RESOURCE_LIST List[1];
+} IO_RESOURCE_REQUIREMENTS_LIST, *PIO_RESOURCE_REQUIREMENTS_LIST;
+
 //
 // File Information Classes for NtQueryInformationFile
 //
 typedef enum _FILE_INFORMATION_CLASS
 {
     FileDirectoryInformation = 1,
-    FileFullDirectoryInformation,
-    FileBothDirectoryInformation,
-    FileBasicInformation,
-    FileStandardInformation,
-    FileInternalInformation,
-    FileEaInformation,
-    FileAccessInformation,
-    FileNameInformation,
-    FileRenameInformation,
-    FileLinkInformation,
-    FileNamesInformation,
-    FileDispositionInformation,
-    FilePositionInformation,
-    FileFullEaInformation,
-    FileModeInformation,
-    FileAlignmentInformation,
-    FileAllInformation,
-    FileAllocationInformation,
-    FileEndOfFileInformation,
-    FileAlternateNameInformation,
-    FileStreamInformation,
-    FilePipeInformation,
-    FilePipeLocalInformation,
-    FilePipeRemoteInformation,
-    FileMailslotQueryInformation,
-    FileMailslotSetInformation,
-    FileCompressionInformation,
-    FileObjectIdInformation,
-    FileCompletionInformation,
-    FileMoveClusterInformation,
-    FileQuotaInformation,
-    FileReparsePointInformation,
-    FileNetworkOpenInformation,
-    FileAttributeTagInformation,
-    FileTrackingInformation,
-    FileIdBothDirectoryInformation,
-    FileIdFullDirectoryInformation,
-    FileValidDataLengthInformation,
-    FileShortNameInformation,
-    FileIoCompletionNotificationInformation,
-#if (NTDDI_VERSION >= NTDDI_VISTA)
-    FileIoStatusBlockRangeInformation,
-    FileIoPriorityHintInformation,
-    FileSfioReserveInformation,
-    FileSfioVolumeInformation,
-    FileHardLinkInformation,
-    FileProcessIdsUsingFileInformation,
-    FileNormalizedNameInformation,
-    FileNetworkPhysicalNameInformation,
+    FileFullDirectoryInformation = 2,
+    FileBothDirectoryInformation = 3,
+    FileBasicInformation = 4,
+    FileStandardInformation = 5,
+    FileInternalInformation = 6,
+    FileEaInformation = 7,
+    FileAccessInformation = 8,
+    FileNameInformation = 9,
+    FileRenameInformation = 10,
+    FileLinkInformation = 11,
+    FileNamesInformation = 12,
+    FileDispositionInformation = 13,
+    FilePositionInformation = 14,
+    FileFullEaInformation = 15,
+    FileModeInformation = 16,
+    FileAlignmentInformation = 17,
+    FileAllInformation = 18,
+    FileAllocationInformation = 19,
+    FileEndOfFileInformation = 20,
+    FileAlternateNameInformation = 21,
+    FileStreamInformation = 22,
+    FilePipeInformation = 23,
+    FilePipeLocalInformation = 24,
+    FilePipeRemoteInformation = 25,
+    FileMailslotQueryInformation = 26,
+    FileMailslotSetInformation = 27,
+    FileCompressionInformation = 28,
+    FileObjectIdInformation = 29,
+    FileCompletionInformation = 30,
+    FileMoveClusterInformation = 31,
+    FileQuotaInformation = 32,
+    FileReparsePointInformation = 33,
+    FileNetworkOpenInformation = 34,
+    FileAttributeTagInformation = 35,
+    FileTrackingInformation = 36,
+    FileIdBothDirectoryInformation = 37,
+    FileIdFullDirectoryInformation = 38,
+    FileValidDataLengthInformation = 39,
+    FileShortNameInformation = 40,
+    FileIoCompletionNotificationInformation = 41,
+#if (NTDDI_VERSION >= NTDDI_VISTA) || defined(__REACTOS__)
+    FileIoStatusBlockRangeInformation = 42,
+    FileIoPriorityHintInformation = 43,
+    FileSfioReserveInformation = 44,
+    FileSfioVolumeInformation = 45,
+    FileHardLinkInformation = 46,
+    FileProcessIdsUsingFileInformation = 47,
+    FileNormalizedNameInformation = 48,
+    FileNetworkPhysicalNameInformation = 49,
 #endif
-#if (NTDDI_VERSION >= NTDDI_WIN7)
-    FileIdGlobalTxDirectoryInformation,
-    FileIsRemoteDeviceInformation,
-    FileUnusedInformation,
-    FileNumaNodeInformation,
-    FileStandardLinkInformation,
-    FileRemoteProtocolInformation,
+#if (NTDDI_VERSION >= NTDDI_WIN7) || defined(__REACTOS__)
+    FileIdGlobalTxDirectoryInformation = 50,
+    FileIsRemoteDeviceInformation = 51,
+    FileAttributeCacheInformation = 52, // FileUnusedInformation since Windows 8.1
+    FileNumaNodeInformation = 53,
+    FileStandardLinkInformation = 54,
+    FileRemoteProtocolInformation = 55,
+#endif
+#if (NTDDI_VERSION >= NTDDI_WIN8) || defined(__REACTOS__)
+    FileRenameInformationBypassAccessCheck = 56,
+    FileLinkInformationBypassAccessCheck = 57,
+    FileVolumeNameInformation = 58,
+    FileIdInformation = 59,
+    FileIdExtdDirectoryInformation = 60,
+#endif
+#if (NTDDI_VERSION >= NTDDI_WINBLUE) || defined(__REACTOS__)
+    FileReplaceCompletionInformation = 61,
+    FileHardLinkFullIdInformation = 62,
+    FileIdExtdBothDirectoryInformation = 63, // Update 1
+#endif
+#if (NTDDI_VERSION >= NTDDI_WIN10_RS1) || defined(__REACTOS__)
+    FileDispositionInformationEx = 64,
+    FileRenameInformationEx = 65,
+    FileRenameInformationExBypassAccessCheck = 66,
+#endif
+#if (NTDDI_VERSION >= NTDDI_WIN10_RS2) || defined(__REACTOS__)
+    FileDesiredStorageClassInformation = 67,
+    FileStatInformation = 68,
+#endif
+#if (NTDDI_VERSION >= NTDDI_WIN10_RS3) || defined(__REACTOS__)
+    FileMemoryPartitionInformation = 69,
+#endif
+#if (NTDDI_VERSION >= NTDDI_WIN10_RS4) || defined(__REACTOS__)
+    FileStatLxInformation = 70,
+    FileCaseSensitiveInformation = 71,
+#endif
+#if (NTDDI_VERSION >= NTDDI_WIN10_RS5) || defined(__REACTOS__)
+    FileLinkInformationEx = 72,
+    FileLinkInformationExBypassAccessCheck = 73,
+    FileStorageReserveIdInformation = 74,
+    FileCaseSensitiveInformationForceAccessCheck = 75,
+#endif
+#if (NTDDI_VERSION >= NTDDI_WIN11) || defined(__REACTOS__) // 10.0.20150.1000
+    FileKnownFolderInformation = 76,
 #endif
     FileMaximumInformation
 } FILE_INFORMATION_CLASS, *PFILE_INFORMATION_CLASS;
@@ -742,6 +893,11 @@ typedef struct _FILE_PIPE_PEEK_BUFFER
     CHAR Data[1];
 } FILE_PIPE_PEEK_BUFFER, *PFILE_PIPE_PEEK_BUFFER;
 
+typedef struct _FILE_MODE_INFORMATION
+{
+    ULONG Mode;
+} FILE_MODE_INFORMATION, *PFILE_MODE_INFORMATION;
+
 //
 // I/O Error Log Structures
 //
@@ -1017,6 +1173,8 @@ typedef VOID
     _In_ PVOID ApcContext,
     _In_ PIO_STATUS_BLOCK IoStatusBlock,
     _In_ ULONG Reserved);
+
+#define PIO_APC_ROUTINE_DEFINED
 
 //
 // Mailslot IOCTL Codes

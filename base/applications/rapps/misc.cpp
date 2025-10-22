@@ -12,8 +12,17 @@
 
 static HANDLE hLog = NULL;
 
-static BOOL bIsSys64ResultCached = FALSE;
-static BOOL bIsSys64Result = FALSE;
+UINT
+ErrorBox(HWND hOwner, UINT Error)
+{
+    if (!Error)
+        Error = ERROR_INTERNAL_ERROR; // Note: geninst.cpp depends on this
+    WCHAR buf[400];
+    UINT fmf = FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM;
+    FormatMessageW(fmf, NULL, Error, 0, buf, _countof(buf), NULL);
+    MessageBoxW(hOwner, buf, 0, MB_OK | MB_ICONSTOP);
+    return Error;
+}
 
 VOID
 CopyTextToClipboard(LPCWSTR lpszText)
@@ -42,8 +51,33 @@ CopyTextToClipboard(LPCWSTR lpszText)
     CloseClipboard();
 }
 
+static INT_PTR CALLBACK
+NothingDlgProc(HWND hDlg, UINT uMsg, WPARAM, LPARAM)
+{
+    return uMsg == WM_CLOSE ? DestroyWindow(hDlg) : FALSE;
+}
+
 VOID
-ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem)
+EmulateDialogReposition(HWND hwnd)
+{
+    static const DWORD DlgTmpl[] = { WS_POPUP | WS_CAPTION | WS_SYSMENU, 0, 0, 0, 0, 0 };
+    HWND hDlg = CreateDialogIndirectW(NULL, (LPDLGTEMPLATE)DlgTmpl, NULL, NothingDlgProc);
+    if (hDlg)
+    {
+        RECT r;
+        GetWindowRect(hwnd, &r);
+        if (SetWindowPos(hDlg, hDlg, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE))
+        {
+            SendMessage(hDlg, DM_REPOSITION, 0, 0);
+            if (GetWindowRect(hDlg, &r))
+                SetWindowPos(hwnd, hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        SendMessage(hDlg, WM_CLOSE, 0, 0);
+    }
+}
+
+VOID
+ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem, POINT *Point)
 {
     HMENU hMenu = NULL;
     HMENU hPopupMenu;
@@ -71,15 +105,71 @@ ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem)
         SetMenuDefaultItem(hPopupMenu, DefaultItem, FALSE);
     }
 
-    GetCursorPos(&pt);
+    if (!Point)
+    {
+        GetCursorPos(Point = &pt);
+    }
 
     SetForegroundWindow(hwnd);
-    TrackPopupMenu(hPopupMenu, 0, pt.x, pt.y, 0, hwndOwner, NULL);
+    TrackPopupMenu(hPopupMenu, 0, Point->x, Point->y, 0, hwndOwner, NULL);
 
     if (hMenu)
     {
         DestroyMenu(hMenu);
     }
+}
+
+extern BOOL IsZipFile(PCWSTR Path);
+
+UINT
+ClassifyFile(PCWSTR Path)
+{
+    const UINT share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    HANDLE hFile = CreateFileW(Path, GENERIC_READ, share, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile != INVALID_HANDLE_VALUE)
+    {
+        BYTE buf[8];
+        DWORD io;
+        if (!ReadFile(hFile, buf, sizeof(buf), &io, NULL) || io != sizeof(buf))
+            buf[0] = 0;
+        CloseHandle(hFile);
+
+        if (buf[0] == 0xD0 && buf[1] == 0xCF && buf[2] == 0x11 && buf[3] == 0xE0 &&
+            buf[4] == 0xA1 && buf[5] == 0xB1 && buf[6] == 0x1A && buf[7] == 0xE1)
+        {
+            return MAKEWORD('M', PERCEIVED_TYPE_APPLICATION); // MSI
+        }
+        if (buf[0] == 'M' || buf[0] == 'Z')
+        {
+            SHFILEINFO shfi;
+            if (SHGetFileInfoW(Path, 0, &shfi, sizeof(shfi), SHGFI_EXETYPE))
+                return MAKEWORD('E', PERCEIVED_TYPE_APPLICATION);
+        }
+        if (buf[0] == 'M' && buf[1] == 'S' && buf[2] == 'C' && buf[3] == 'F')
+        {
+            return MAKEWORD('C', PERCEIVED_TYPE_COMPRESSED); // CAB
+        }
+    }
+
+    if (IsZipFile(Path)) // .zip last because we want to return SFX.exe with higher priority
+    {
+        return MAKEWORD('Z', PERCEIVED_TYPE_COMPRESSED);
+    }
+    return PERCEIVED_TYPE_UNKNOWN;
+}
+
+BOOL
+OpensWithExplorer(PCWSTR Path)
+{
+    WCHAR szCmd[MAX_PATH * 2];
+    DWORD cch = _countof(szCmd);
+    PCWSTR pszExt = PathFindExtensionW(Path);
+    HRESULT hr = AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN | ASSOCF_NOTRUNCATE,
+                                   ASSOCSTR_COMMAND, pszExt, NULL, szCmd, &cch);
+    if (SUCCEEDED(hr) && StrStrIW(szCmd, L" zipfldr.dll,")) // .zip
+        return TRUE;
+    PathRemoveArgsW(szCmd);
+    return SUCCEEDED(hr) && !StrCmpIW(PathFindFileNameW(szCmd), L"explorer.exe"); // .cab
 }
 
 BOOL
@@ -135,6 +225,8 @@ StartProcess(const CStringW &Path, BOOL Wait)
     {
         EnableWindow(hMainWnd, TRUE);
         SetForegroundWindow(hMainWnd);
+        // We got the real activation message during MsgWaitForMultipleObjects while
+        // we were disabled, we need to set the focus again now.
         SetFocus(hMainWnd);
     }
 
@@ -153,7 +245,7 @@ GetStorageDirectory(CStringW &Directory)
         BOOL bHasPath = SHGetSpecialFolderPathW(NULL, DirectoryStr, CSIDL_LOCAL_APPDATA, TRUE);
         if (bHasPath)
         {
-            PathAppendW(DirectoryStr, L"rapps");
+            PathAppendW(DirectoryStr, RAPPS_NAME);
         }
         CachedDirectory.ReleaseBuffer();
 
@@ -289,32 +381,14 @@ GetInstalledVersion(CStringW *pszVersion, const CStringW &szRegName)
 BOOL
 IsSystem64Bit()
 {
-    if (bIsSys64ResultCached)
-    {
-        // just return cached result
-        return bIsSys64Result;
-    }
-
-    SYSTEM_INFO si;
-    typedef void(WINAPI * LPFN_PGNSI)(LPSYSTEM_INFO);
-    LPFN_PGNSI pGetNativeSystemInfo =
-        (LPFN_PGNSI)GetProcAddress(GetModuleHandle(L"kernel32.dll"), "GetNativeSystemInfo");
-    if (pGetNativeSystemInfo)
-    {
-        pGetNativeSystemInfo(&si);
-        if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ||
-            si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_IA64)
-        {
-            bIsSys64Result = TRUE;
-        }
-    }
-    else
-    {
-        bIsSys64Result = FALSE;
-    }
-
-    bIsSys64ResultCached = TRUE; // next time calling this function, it will directly return bIsSys64Result
-    return bIsSys64Result;
+#ifdef _WIN64
+    return TRUE;
+#else
+    static UINT cache = 0;
+    if (!cache)
+        cache = 1 + (IsOS(OS_WOW6432) != FALSE);
+    return cache - 1;
+#endif
 }
 
 INT
@@ -368,6 +442,64 @@ UnixTimeToFileTime(DWORD dwUnixTime, LPFILETIME pFileTime)
     pFileTime->dwHighDateTime = ll >> 32;
 }
 
+HRESULT
+RegKeyHasValues(HKEY hKey, LPCWSTR Path, REGSAM wowsam)
+{
+    CRegKey key;
+    LONG err = key.Open(hKey, Path, KEY_QUERY_VALUE | wowsam);
+    if (err == ERROR_SUCCESS)
+    {
+        WCHAR name[1];
+        DWORD cchname = _countof(name), cbsize = 0;
+        err = RegEnumValueW(key, 0, name, &cchname, NULL, NULL, NULL, &cbsize);
+        if (err == ERROR_NO_MORE_ITEMS)
+            return S_FALSE;
+        if (err == ERROR_MORE_DATA)
+            err = ERROR_SUCCESS;
+    }
+    return HRESULT_FROM_WIN32(err);
+}
+
+LPCWSTR
+GetRegString(CRegKey &Key, LPCWSTR Name, CStringW &Value)
+{
+    for (;;)
+    {
+        ULONG cb = 0, cch;
+        ULONG err = Key.QueryValue(Name, NULL, NULL, &cb);
+        if (err)
+            break;
+        cch = cb / sizeof(WCHAR);
+        LPWSTR p = Value.GetBuffer(cch + 1);
+        p[cch] = UNICODE_NULL;
+        err = Key.QueryValue(Name, NULL, (BYTE*)p, &cb);
+        if (err == ERROR_MORE_DATA)
+            continue;
+        if (err)
+            break;
+        Value.ReleaseBuffer();
+        return Value.GetString();
+    }
+    return NULL;
+}
+
+bool
+ExpandEnvStrings(CStringW &Str)
+{
+    CStringW buf;
+    DWORD cch = ExpandEnvironmentStringsW(Str, NULL, 0);
+    if (cch)
+    {
+        if (ExpandEnvironmentStringsW(Str, buf.GetBuffer(cch), cch) == cch)
+        {
+            buf.ReleaseBuffer(cch - 1);
+            Str = buf;
+            return true;
+        }
+    }
+    return false;
+}
+
 BOOL
 SearchPatternMatch(LPCWSTR szHaystack, LPCWSTR szNeedle)
 {
@@ -375,4 +507,199 @@ SearchPatternMatch(LPCWSTR szHaystack, LPCWSTR szNeedle)
         return TRUE;
     /* TODO: Improve pattern search beyond a simple case-insensitive substring search. */
     return StrStrIW(szHaystack, szNeedle) != NULL;
+}
+
+BOOL
+DeleteDirectoryTree(LPCWSTR Dir, HWND hwnd)
+{
+    CStringW from(Dir);
+    UINT cch = from.GetLength();
+    from.Append(L"00");
+    LPWSTR p = from.GetBuffer();
+    p[cch] = p[cch + 1] = L'\0'; // Double null-terminate
+    UINT fof = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+    SHFILEOPSTRUCT shfos = { hwnd, FO_DELETE, p, NULL, (FILEOP_FLAGS)fof };
+    return SHFileOperationW(&shfos);
+}
+
+UINT
+CreateDirectoryTree(LPCWSTR Dir)
+{
+    UINT err = SHCreateDirectory(NULL, Dir);
+    return err == ERROR_ALREADY_EXISTS ? 0 : err;
+}
+
+CStringW
+SplitFileAndDirectory(LPCWSTR FullPath, CStringW *pDir)
+{
+    CPathW dir = FullPath;
+    //int win = dir.ReverseFind(L'\\'), nix = dir.ReverseFind(L'/'), sep = max(win, nix);
+    int sep = dir.FindFileName();
+    CStringW file = dir.m_strPath.Mid(sep);
+    if (pDir)
+        *pDir = sep == -1 ? L"" : dir.m_strPath.Left(sep - 1);
+    return file;
+}
+
+HRESULT
+GetSpecialPath(UINT csidl, CStringW &Path, HWND hwnd)
+{
+    if (!SHGetSpecialFolderPathW(hwnd, Path.GetBuffer(MAX_PATH), csidl, TRUE))
+        return E_FAIL;
+    Path.ReleaseBuffer();
+    return S_OK;
+}
+
+HRESULT
+GetKnownPath(REFKNOWNFOLDERID kfid, CStringW &Path, DWORD Flags)
+{
+    PWSTR p;
+    FARPROC f = GetProcAddress(LoadLibraryW(L"SHELL32"), "SHGetKnownFolderPath");
+    if (!f)
+        return HRESULT_FROM_WIN32(ERROR_OLD_WIN_VERSION);
+    HRESULT hr = ((HRESULT(WINAPI*)(REFKNOWNFOLDERID,UINT,HANDLE,PWSTR*))f)(kfid, Flags, NULL, &p);
+    if (FAILED(hr))
+        return hr;
+    Path = p;
+    CoTaskMemFree(p);
+    return hr;
+}
+
+HRESULT
+GetProgramFilesPath(CStringW &Path, BOOL PerUser, HWND hwnd)
+{
+    if (!PerUser)
+        return GetSpecialPath(CSIDL_PROGRAM_FILES, Path, hwnd);
+
+    HRESULT hr = GetKnownPath(FOLDERID_UserProgramFiles, Path);
+    if (FAILED(hr))
+    {
+        hr = GetSpecialPath(CSIDL_LOCAL_APPDATA, Path, hwnd);
+        // Use the correct path on NT6 (on NT5 the path becomes a bit long)
+        if (SUCCEEDED(hr) && LOBYTE(GetVersion()) >= 6)
+        {
+            Path = BuildPath(Path, L"Programs"); // Should not be localized
+        }
+    }
+    return hr;
+}
+
+static BOOL
+ReadAt(HANDLE Handle, UINT Offset, LPVOID Buffer, UINT Size)
+{
+    OVERLAPPED ol = {};
+    ol.Offset = Offset;
+    DWORD cb;
+    return ReadFile(Handle, Buffer, Size, &cb, &ol) && cb == Size;
+}
+
+InstallerType
+GuessInstallerType(LPCWSTR Installer, UINT &ExtraInfo)
+{
+    ExtraInfo = 0;
+    InstallerType it = INSTALLER_UNKNOWN;
+
+    HANDLE hFile = CreateFileW(Installer, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+        return it;
+
+    BYTE buf[0x30 + 12];
+    if (!ReadAt(hFile, 0, buf, sizeof(buf)))
+        goto done;
+
+    if (buf[0] == 0xD0 && buf[1] == 0xCF && buf[2] == 0x11 && buf[3] == 0xE0)
+    {
+        if (!StrCmpIW(L".msi", PathFindExtensionW(Installer)))
+        {
+            it = INSTALLER_MSI;
+            goto done;
+        }
+    }
+
+    if (buf[0] != 'M' || buf[1] != 'Z')
+        goto done;
+
+    // <= Inno 5.1.4
+    {
+        UINT sig[3];
+        C_ASSERT(sizeof(buf) >= 0x30 + sizeof(sig));
+        CopyMemory(sig, buf + 0x30, sizeof(sig));
+        if (sig[0] == 0x6F6E6E49 && sig[1] == ~sig[2])
+        {
+            it = INSTALLER_INNO;
+            ExtraInfo = 1;
+            goto done;
+        }
+    }
+
+    // NSIS 1.6+
+    {
+        UINT nsis[1+1+3+1+1], nsisskip = 512;
+        for (UINT nsisoffset = nsisskip * 20; nsisoffset < 1024 * 1024 * 50; nsisoffset += nsisskip)
+        {
+            if (ReadAt(hFile, nsisoffset, nsis, sizeof(nsis)) && nsis[1] == 0xDEADBEEF)
+            {
+                if (nsis[2] == 0x6C6C754E && nsis[3] == 0x74666F73 && nsis[4] == 0x74736E49)
+                {
+                    it = INSTALLER_NSIS;
+                    goto done;
+                }
+            }
+        }
+    }
+
+    if (HMODULE hMod = LoadLibraryEx(Installer, NULL, LOAD_LIBRARY_AS_DATAFILE))
+    {
+        // Inno
+        enum { INNORCSETUPLDR = 11111 };
+        HGLOBAL hGlob;
+        HRSRC hRsrc = FindResourceW(hMod, MAKEINTRESOURCE(INNORCSETUPLDR), RT_RCDATA);
+        if (hRsrc && (hGlob = LoadResource(hMod, hRsrc)) != NULL)
+        {
+            if (BYTE *p = (BYTE*)LockResource(hGlob))
+            {
+                if (p[0] == 'r' && p[1] == 'D' && p[2] == 'l' && p[3] == 'P' && p[4] == 't' && p[5] == 'S')
+                    it = INSTALLER_INNO;
+                UnlockResource((void*)p);
+            }
+        }
+        FreeLibrary(hMod);
+    }
+done:
+    CloseHandle(hFile);
+    return it;
+}
+
+BOOL
+GetSilentInstallParameters(InstallerType InstallerType, UINT ExtraInfo, LPCWSTR Installer, CStringW &Parameters)
+{
+    switch (InstallerType)
+    {
+        case INSTALLER_MSI:
+        {
+            Parameters.Format(L"/i \"%s\" /qn", Installer);
+            return TRUE;
+        }
+
+        case INSTALLER_INNO:
+        {
+            LPCWSTR pszInnoParams = L"/SILENT /VERYSILENT /SP-";
+            if (ExtraInfo)
+                Parameters.Format(L"%s", pszInnoParams);
+            else
+                Parameters.Format(L"%s /SUPPRESSMSGBOXES", pszInnoParams); // https://jrsoftware.org/files/is5.5-whatsnew.htm
+            return TRUE;
+        }
+
+        case INSTALLER_NSIS:
+        {
+            Parameters = L"/S";
+            return TRUE;
+        }
+
+        default:
+        {
+            return FALSE;
+        }
+    }
 }

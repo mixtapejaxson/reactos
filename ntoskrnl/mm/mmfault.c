@@ -2,7 +2,7 @@
  * COPYRIGHT:       See COPYING in the top directory
  * PROJECT:         ReactOS kernel
  * FILE:            ntoskrnl/mm/mmfault.c
- * PURPOSE:         Kernel memory managment functions
+ * PURPOSE:         Kernel memory management functions
  * PROGRAMMERS:     David Welch (welch@cwcom.net)
  */
 
@@ -16,13 +16,16 @@
 #define MODULE_INVOLVED_IN_ARM3
 #include "ARM3/miarm.h"
 
+extern MM_AVL_TABLE MiRosKernelVadRoot;
+
 /* PRIVATE FUNCTIONS **********************************************************/
 
 NTSTATUS
 NTAPI
 MmpAccessFault(KPROCESSOR_MODE Mode,
                ULONG_PTR Address,
-               BOOLEAN FromMdl)
+               BOOLEAN FromMdl,
+               ULONG FaultCode)
 {
     PMMSUPPORT AddressSpace;
     MEMORY_AREA* MemoryArea;
@@ -34,6 +37,14 @@ MmpAccessFault(KPROCESSOR_MODE Mode,
     {
         DPRINT1("Page fault at high IRQL was %u\n", KeGetCurrentIrql());
         return(STATUS_UNSUCCESSFUL);
+    }
+
+    /* Instruction fetch and the page is present.
+       This means the page is NX and we cannot do anything to "fix" it. */
+    if (MI_IS_INSTRUCTION_FETCH(FaultCode))
+    {
+        DPRINT1("Page fault instruction fetch at %p\n", Address);
+        return STATUS_ACCESS_VIOLATION;
     }
 
     /*
@@ -200,6 +211,10 @@ MmNotPresentFault(KPROCESSOR_MODE Mode,
 
 extern BOOLEAN Mmi386MakeKernelPageTableGlobal(PVOID Address);
 
+VOID
+NTAPI
+MmRebalanceMemoryConsumersAndWait(VOID);
+
 NTSTATUS
 NTAPI
 MmAccessFault(IN ULONG FaultCode,
@@ -207,7 +222,9 @@ MmAccessFault(IN ULONG FaultCode,
               IN KPROCESSOR_MODE Mode,
               IN PVOID TrapInformation)
 {
-    PMEMORY_AREA MemoryArea = NULL;
+    PMMVAD Vad = NULL;
+    NTSTATUS Status;
+    BOOLEAN IsArm3Fault = FALSE;
 
     /* Cute little hack for ROS */
     if ((ULONG_PTR)Address >= (ULONG_PTR)MmSystemRangeStart)
@@ -222,46 +239,77 @@ MmAccessFault(IN ULONG FaultCode,
 #endif
     }
 
-    /* Handle shared user page, which doesn't have a VAD / MemoryArea */
-    if (PAGE_ALIGN(Address) == (PVOID)MM_SHARED_USER_DATA_VA)
+    /* Handle shared user page / page table, which don't have a VAD / MemoryArea */
+    if ((PAGE_ALIGN(Address) == (PVOID)MM_SHARED_USER_DATA_VA) ||
+        MI_IS_PAGE_TABLE_ADDRESS(Address))
     {
         /* This is an ARM3 fault */
-        DPRINT("ARM3 fault %p\n", MemoryArea);
+        DPRINT("ARM3 fault %p\n", Address);
         return MmArmAccessFault(FaultCode, Address, Mode, TrapInformation);
     }
 
     /* Is there a ReactOS address space yet? */
     if (MmGetKernelAddressSpace())
     {
-        /* Check if this is an ARM3 memory area */
-        MemoryArea = MmLocateMemoryAreaByAddress(MmGetKernelAddressSpace(), Address);
-        if (!(MemoryArea) && (Address <= MM_HIGHEST_USER_ADDRESS))
+        if (Address > MM_HIGHEST_USER_ADDRESS)
+        {
+            /* Check if this is an ARM3 memory area */
+            MiLockWorkingSetShared(PsGetCurrentThread(), &MmSystemCacheWs);
+            Vad = MiLocateVad(&MiRosKernelVadRoot, Address);
+
+            if ((Vad != NULL) && !MI_IS_ROSMM_VAD(Vad))
+            {
+                IsArm3Fault = TRUE;
+            }
+
+            MiUnlockWorkingSetShared(PsGetCurrentThread(), &MmSystemCacheWs);
+        }
+        else
         {
             /* Could this be a VAD fault from user-mode? */
-            MemoryArea = MmLocateMemoryAreaByAddress(MmGetCurrentAddressSpace(), Address);
+            MiLockProcessWorkingSetShared(PsGetCurrentProcess(), PsGetCurrentThread());
+            Vad = MiLocateVad(&PsGetCurrentProcess()->VadRoot, Address);
+
+            if ((Vad != NULL) && !MI_IS_ROSMM_VAD(Vad))
+            {
+                IsArm3Fault = TRUE;
+            }
+
+            MiUnlockProcessWorkingSetShared(PsGetCurrentProcess(), PsGetCurrentThread());
         }
     }
 
-    /* Is this an ARM3 memory area, or is there no address space yet? */
-    if (((MemoryArea) && (MemoryArea->Type == MEMORY_AREA_OWNED_BY_ARM3)) ||
-            (!(MemoryArea) && ((ULONG_PTR)Address >= (ULONG_PTR)MmPagedPoolStart)) ||
-            (!MmGetKernelAddressSpace()))
+    /* Is this an ARM3 VAD, or is there no address space yet? */
+    if (IsArm3Fault ||
+        ((Vad == NULL) &&
+         ((ULONG_PTR)Address >= (ULONG_PTR)MmPagedPoolStart) &&
+         ((ULONG_PTR)Address < (ULONG_PTR)MmPagedPoolEnd)) ||
+        (!MmGetKernelAddressSpace()))
     {
         /* This is an ARM3 fault */
-        DPRINT("ARM3 fault %p\n", MemoryArea);
+        DPRINT("ARM3 fault %p\n", Vad);
         return MmArmAccessFault(FaultCode, Address, Mode, TrapInformation);
     }
 
+Retry:
     /* Keep same old ReactOS Behaviour */
     if (!MI_IS_NOT_PRESENT_FAULT(FaultCode))
     {
         /* Call access fault */
-        return MmpAccessFault(Mode, (ULONG_PTR)Address, TrapInformation ? FALSE : TRUE);
+        Status = MmpAccessFault(Mode, (ULONG_PTR)Address, TrapInformation ? FALSE : TRUE, FaultCode);
     }
     else
     {
         /* Call not present */
-        return MmNotPresentFault(Mode, (ULONG_PTR)Address, TrapInformation ? FALSE : TRUE);
+        Status = MmNotPresentFault(Mode, (ULONG_PTR)Address, TrapInformation ? FALSE : TRUE);
     }
+
+    if (Status == STATUS_NO_MEMORY)
+    {
+        MmRebalanceMemoryConsumersAndWait();
+        goto Retry;
+    }
+
+    return Status;
 }
 

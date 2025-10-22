@@ -111,7 +111,6 @@ static HRESULT __stdcall Volume_FindMixerControl(CSysTray * pSysTray)
 
 HRESULT Volume_IsMute()
 {
-#if 0
     MIXERCONTROLDETAILS mixerControlDetails;
 
     if (g_mixerId != (UINT)-1 && g_muteControlID != (DWORD)-1)
@@ -123,14 +122,14 @@ HRESULT Volume_IsMute()
         mixerControlDetails.cChannels = 1;
         mixerControlDetails.paDetails = &detailsResult;
         mixerControlDetails.cbDetails = sizeof(detailsResult);
-        if (mixerGetControlDetailsW((HMIXEROBJ) g_mixerId, &mixerControlDetails, 0))
+        if (mixerGetControlDetailsW((HMIXEROBJ)UlongToHandle(g_mixerId), &mixerControlDetails, 0))
             return E_FAIL;
 
         TRACE("Obtained mute status %d\n", detailsResult);
 
         g_IsMute = detailsResult != 0;
     }
-#endif
+
     return S_OK;
 }
 
@@ -221,7 +220,7 @@ static void _RunVolume(BOOL bTray)
 
 static void _RunMMCpl()
 {
-    ShellExecuteW(NULL, NULL, L"mmsys.cpl", NULL, NULL, SW_NORMAL);
+    CSysTray::RunDll("mmsys.cpl", "");
 }
 
 static void _ShowContextMenu(CSysTray * pSysTray)

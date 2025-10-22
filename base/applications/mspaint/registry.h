@@ -1,9 +1,8 @@
 /*
- * PROJECT:     PAINT for ReactOS
- * LICENSE:     LGPL
- * FILE:        base/applications/mspaint/registry.h
- * PURPOSE:     Offering functions dealing with registry values
- * PROGRAMMERS: Benedikt Freisen
+ * PROJECT:    PAINT for ReactOS
+ * LICENSE:    LGPL-2.0-or-later (https://spdx.org/licenses/LGPL-2.0-or-later)
+ * PURPOSE:    Offering functions dealing with registry values
+ * COPYRIGHT:  Copyright 2015 Benedikt Freisen <b.freisen@gmx.net>
  */
 
 #pragma once
@@ -29,9 +28,9 @@ public:
     DWORD UnitSetting;
     WINDOWPLACEMENT WindowPlacement;
 
-    CString strFiles[MAX_RECENT_FILES];
+    CStringW strFiles[MAX_RECENT_FILES];
 
-    CString strFontName;
+    CStringW strFontName;
     DWORD PointSize;
     DWORD Bold;
     DWORD Italic;
@@ -62,9 +61,9 @@ public:
         STRETCHED
     };
 
-    static void SetWallpaper(LPCTSTR szFileName, WallpaperStyle style);
+    static void SetWallpaper(LPCWSTR szFileName, WallpaperStyle style);
 
     void Load(INT nCmdShow);
     void Store();
-    void SetMostRecentFile(LPCTSTR szPathName);
+    void SetMostRecentFile(LPCWSTR szPathName);
 };

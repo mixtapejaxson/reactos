@@ -17,6 +17,10 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#ifdef __REACTOS__
+    #undef _WIN32_WINNT
+    #define _WIN32_WINNT _WIN32_WINNT_VISTA /* for RegGetValueW */
+#endif
 #include <stdarg.h>
 #include <assert.h>
 
@@ -34,8 +38,14 @@
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
 /* Default IQueryAssociations::Init() flags */
+#ifdef __REACTOS__
+#define SHLWAPI_DEF_ASSOCF (ASSOCF_INIT_BYEXENAME | ASSOCF_INIT_DEFAULTTOSTAR | \
+                            ASSOCF_INIT_DEFAULTTOFOLDER | ASSOCF_INIT_NOREMAPCLSID | \
+                            ASSOCF_INIT_IGNOREUNKNOWN)
+#else
 #define SHLWAPI_DEF_ASSOCF (ASSOCF_INIT_BYEXENAME|ASSOCF_INIT_DEFAULTTOSTAR| \
                             ASSOCF_INIT_DEFAULTTOFOLDER)
+#endif
 
 /*************************************************************************
  * SHLWAPI_ParamAToW
@@ -368,8 +378,12 @@ HRESULT WINAPI AssocQueryKeyW(ASSOCF cfFlags, ASSOCKEY assockey, LPCWSTR pszAsso
   hRet = AssocCreate( CLSID_QueryAssociations, &IID_IQueryAssociations, (void **)&lpAssoc );
   if (FAILED(hRet)) return hRet;
 
+#ifdef __REACTOS__
+  hRet = IQueryAssociations_Init(lpAssoc, cfFlags & SHLWAPI_DEF_ASSOCF, pszAssoc, NULL, NULL);
+#else
   cfFlags &= SHLWAPI_DEF_ASSOCF;
   hRet = IQueryAssociations_Init(lpAssoc, cfFlags, pszAssoc, NULL, NULL);
+#endif
 
   if (SUCCEEDED(hRet))
     hRet = IQueryAssociations_GetKey(lpAssoc, cfFlags, assockey, pszExtra, phkeyOut);
@@ -533,8 +547,12 @@ HRESULT WINAPI AssocQueryStringByKeyW(ASSOCF cfFlags, ASSOCSTR str, HKEY hkAssoc
   hRet = AssocCreate( CLSID_QueryAssociations, &IID_IQueryAssociations, (void **)&lpAssoc );
   if (FAILED(hRet)) return hRet;
 
+#ifdef __REACTOS__
+  hRet = IQueryAssociations_Init(lpAssoc, cfFlags & SHLWAPI_DEF_ASSOCF, 0, hkAssoc, NULL);
+#else
   cfFlags &= SHLWAPI_DEF_ASSOCF;
   hRet = IQueryAssociations_Init(lpAssoc, cfFlags, 0, hkAssoc, NULL);
+#endif
 
   if (SUCCEEDED(hRet))
     hRet = IQueryAssociations_GetString(lpAssoc, cfFlags, str, pszExtra,

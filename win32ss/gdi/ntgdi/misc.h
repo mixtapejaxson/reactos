@@ -23,7 +23,9 @@ extern BOOL APIENTRY IntEngLeave(PINTENG_ENTER_LEAVE EnterLeave);
 extern HGDIOBJ StockObjects[];
 extern USHORT gusLanguageID;
 
+BOOL InitializeGreCSRSS(VOID);
 USHORT FASTCALL UserGetLanguageID(VOID);
+
 PVOID APIENTRY HackSecureVirtualMemory(IN PVOID,IN SIZE_T,IN ULONG,OUT PVOID *);
 VOID APIENTRY HackUnsecureVirtualMemory(IN PVOID);
 
@@ -44,23 +46,36 @@ RegQueryValue(
 
 VOID
 NTAPI
-RegWriteSZ(HKEY hkey, PWSTR pwszValue, PWSTR pwszData);
+RegWriteSZ(HKEY hkey, PCWSTR pwszValue, PWSTR pwszData);
 
 VOID
 NTAPI
-RegWriteDWORD(HKEY hkey, PWSTR pwszValue, DWORD dwData);
+RegWriteDWORD(HKEY hkey, PCWSTR pwszValue, DWORD dwData);
 
 BOOL
 NTAPI
-RegReadDWORD(HKEY hkey, PWSTR pwszValue, PDWORD pdwData);
+RegReadDWORD(HKEY hkey, PCWSTR pwszValue, PDWORD pdwData);
 
 DWORD
 NTAPI
-RegGetSectionDWORD(LPCWSTR pszSection, LPWSTR pszValue, DWORD dwDefault);
+RegGetSectionDWORD(LPCWSTR pszSection, PCWSTR pszValue, DWORD dwDefault);
 
-VOID FASTCALL
-SetLastNtError(
-  NTSTATUS Status);
+NTSTATUS NTAPI
+RegDeleteValueW(_In_ HKEY hKey, _In_ LPCWSTR pszValueName);
+
+NTSTATUS NTAPI
+RegEnumValueW(
+    _In_ HKEY hKey,
+    _In_ ULONG Index,
+    _Out_opt_ LPWSTR Name,
+    _Out_opt_ PULONG NameLength,
+    _Out_opt_ PULONG Type,
+    _Out_opt_ PVOID Data,
+    _Out_opt_ PULONG DataLength);
+
+VOID
+FASTCALL
+SetLastNtError(_In_ NTSTATUS Status);
 
 typedef struct _GDI_POOL *PGDI_POOL;
 

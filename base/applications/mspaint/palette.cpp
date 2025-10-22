@@ -1,10 +1,9 @@
 /*
- * PROJECT:     PAINT for ReactOS
- * LICENSE:     LGPL
- * FILE:        base/applications/mspaint/palette.cpp
- * PURPOSE:     Window procedure of the palette window
- * PROGRAMMERS: Benedikt Freisen
- *              Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
+ * PROJECT:    PAINT for ReactOS
+ * LICENSE:    LGPL-2.0-or-later (https://spdx.org/licenses/LGPL-2.0-or-later)
+ * PURPOSE:    Window procedure of the palette window
+ * COPYRIGHT:  Copyright 2015 Benedikt Freisen <b.freisen@gmx.net>
+ *             Copyright 2023 Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
  */
 
 #include "precomp.h"
@@ -20,6 +19,17 @@
 CPaletteWindow paletteWindow;
 
 /* FUNCTIONS ********************************************************/
+
+CPaletteWindow::CPaletteWindow()
+    : m_hbmCached(NULL)
+{
+}
+
+CPaletteWindow::~CPaletteWindow()
+{
+    if (m_hbmCached)
+        ::DeleteObject(m_hbmCached);
+}
 
 static VOID drawColorBox(HDC hDC, LPCRECT prc, COLORREF rgbColor, UINT nBorder)
 {
@@ -76,14 +86,14 @@ LRESULT CPaletteWindow::OnPaint(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& b
     /* To avoid flickering, we use a memory bitmap.
        The left and top values are zeros in client rectangle */
     HDC hMemDC = ::CreateCompatibleDC(hDC);
-    HBITMAP hbm = ::CreateCompatibleBitmap(hDC, rcClient.right, rcClient.bottom);
-    HGDIOBJ hbmOld = ::SelectObject(hMemDC, hbm);
+    m_hbmCached = CachedBufferDIB(m_hbmCached, rcClient.right, rcClient.bottom);
+    HGDIOBJ hbmOld = ::SelectObject(hMemDC, m_hbmCached);
 
     /* Fill the background (since WM_ERASEBKGND handling is disabled) */
     ::FillRect(hMemDC, &rcClient, (HBRUSH)(COLOR_3DFACE + 1));
 
     /* Draw the big box that contains the black box and the white box */
-    ::SetRect(&rc, X_MARGIN, Y_MARGIN, X_MARGIN + CXY_BIGBOX, Y_MARGIN + CXY_BIGBOX);
+    rc = { X_MARGIN, Y_MARGIN, X_MARGIN + CXY_BIGBOX, Y_MARGIN + CXY_BIGBOX };
     ::DrawEdge(hMemDC, &rc, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
     COLORREF rgbLight = ::GetSysColor(COLOR_3DHIGHLIGHT);
     for (INT y = rc.top; y < rc.bottom; ++y)
@@ -121,7 +131,7 @@ LRESULT CPaletteWindow::OnPaint(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& b
     /* Transfer bits (hDC <-- hMemDC) */
     ::BitBlt(hDC, 0, 0, rcClient.right, rcClient.bottom, hMemDC, 0, 0, SRCCOPY);
 
-    ::DeleteObject(::SelectObject(hMemDC, hbmOld));
+    ::SelectObject(hMemDC, hbmOld);
     ::DeleteDC(hMemDC);
     EndPaint(&ps);
     return 0;
@@ -170,13 +180,7 @@ LRESULT CPaletteWindow::OnRButtonDblClk(UINT nMsg, WPARAM wParam, LPARAM lParam,
 
 LRESULT CPaletteWindow::OnPaletteModelColorChanged(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
 {
-    InvalidateRect(NULL, FALSE);
-    return 0;
-}
-
-LRESULT CPaletteWindow::OnPaletteModelPaletteChanged(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
-{
-    InvalidateRect(NULL, FALSE);
+    Invalidate(FALSE);
     return 0;
 }
 

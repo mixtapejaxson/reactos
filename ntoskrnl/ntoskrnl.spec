@@ -362,6 +362,7 @@
 @ stdcall IoCheckShareAccess(long long ptr ptr long)
 @ stdcall IoCompleteRequest(ptr long)
 @ stdcall IoConnectInterrupt(ptr ptr ptr ptr long long long long long long long)
+@ stdcall -version=0x600+ IoConnectInterruptEx(ptr)
 @ stdcall IoCreateController(long)
 @ stdcall IoCreateDevice(ptr long ptr long long long ptr)
 @ stdcall IoCreateDisk(ptr ptr)
@@ -390,6 +391,7 @@
 @ extern IoDeviceHandlerObjectType
 @ extern IoDeviceObjectType
 @ stdcall IoDisconnectInterrupt(ptr)
+@ stdcall -version=0x600+ IoDisconnectInterruptEx(ptr)
 @ extern IoDriverObjectType
 @ stdcall IoEnqueueIrp(ptr)
 @ stdcall IoEnumerateDeviceObjectList(ptr ptr long ptr)
@@ -1307,7 +1309,7 @@
 @ stdcall RtlUnicodeToOemN(ptr long ptr wstr long)
 @ stdcall RtlUnlockBootStatusData(ptr)
 @ stdcall RtlUnwind(ptr ptr ptr ptr)
-@ cdecl -arch=x86_64 RtlUnwindEx(double double ptr ptr ptr ptr)
+@ stdcall -arch=x86_64,arm RtlUnwindEx(ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlUpcaseUnicodeChar(long)
 @ stdcall RtlUpcaseUnicodeString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToAnsiString(ptr ptr long)
@@ -1323,7 +1325,7 @@
 @ stdcall RtlValidSecurityDescriptor(ptr)
 @ stdcall RtlValidSid(ptr)
 @ stdcall RtlVerifyVersionInfo(ptr long long long)
-@ cdecl -arch=x86_64 RtlVirtualUnwind(long double double ptr ptr ptr ptr ptr)
+@ stdcall -arch=x86_64,arm RtlVirtualUnwind(long int64 int64 ptr ptr ptr ptr ptr)
 @ stdcall RtlVolumeDeviceToDosName(ptr ptr) IoVolumeDeviceToDosName
 @ stdcall RtlWalkFrameChain(ptr long long)
 @ stdcall RtlWriteRegistryValue(long wstr wstr long ptr long)
@@ -1569,6 +1571,7 @@
 @ cdecl _strrev()
 @ cdecl _strset()
 @ cdecl _strupr()
+@ cdecl -version=0x400-0x502 -impsym _swprintf() swprintf # Compatibility with pre NT6
 @ cdecl _vsnprintf()
 @ cdecl _vsnwprintf()
 @ cdecl _wcsicmp()

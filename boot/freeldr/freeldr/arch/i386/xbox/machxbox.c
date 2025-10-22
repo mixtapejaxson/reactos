@@ -73,7 +73,11 @@ XboxGetSerialPort(ULONG Index, PULONG Irq)
 
 extern
 VOID
-DetectSerialPorts(PCONFIGURATION_COMPONENT_DATA BusKey, GET_SERIAL_PORT MachGetSerialPort, ULONG Count);
+DetectSerialPorts(
+    _In_opt_ PCSTR Options,
+    _Inout_ PCONFIGURATION_COMPONENT_DATA BusKey,
+    _In_ GET_SERIAL_PORT MachGetSerialPort,
+    _In_ ULONG Count);
 
 VOID
 XboxGetExtendedBIOSData(PULONG ExtendedBIOSDataArea, PULONG ExtendedBIOSDataSize)
@@ -91,13 +95,10 @@ XboxGetHarddiskConfigurationData(UCHAR DriveNumber, ULONG* pSize)
 {
     PCM_PARTIAL_RESOURCE_LIST PartialResourceList;
     PCM_DISK_GEOMETRY_DEVICE_DATA DiskGeometry;
-    //EXTENDED_GEOMETRY ExtGeometry;
     GEOMETRY Geometry;
     ULONG Size;
 
-    //
-    // Initialize returned size
-    //
+    /* Initialize returned size */
     *pSize = 0;
 
     /* Set 'Configuration Data' value */
@@ -125,13 +126,11 @@ XboxGetHarddiskConfigurationData(UCHAR DriveNumber, ULONG* pSize)
     DiskGeometry = (PVOID)(((ULONG_PTR)PartialResourceList) + sizeof(CM_PARTIAL_RESOURCE_LIST));
 
     /* Get the disk geometry */
-    //ExtGeometry.Size = sizeof(EXTENDED_GEOMETRY);
-
     if (XboxDiskGetDriveGeometry(DriveNumber, &Geometry))
     {
         DiskGeometry->BytesPerSector = Geometry.BytesPerSector;
         DiskGeometry->NumberOfCylinders = Geometry.Cylinders;
-        DiskGeometry->SectorsPerTrack = Geometry.Sectors;
+        DiskGeometry->SectorsPerTrack = Geometry.SectorsPerTrack;
         DiskGeometry->NumberOfHeads = Geometry.Heads;
     }
     else
@@ -147,9 +146,7 @@ XboxGetHarddiskConfigurationData(UCHAR DriveNumber, ULONG* pSize)
           DiskGeometry->SectorsPerTrack,
           DiskGeometry->BytesPerSector);
 
-    //
-    // Return configuration data
-    //
+    /* Return configuration data */
     *pSize = Size;
     return PartialResourceList;
 }
@@ -157,7 +154,6 @@ XboxGetHarddiskConfigurationData(UCHAR DriveNumber, ULONG* pSize)
 static VOID
 DetectDisplayController(PCONFIGURATION_COMPONENT_DATA BusKey)
 {
-    CHAR Buffer[80];
     PCONFIGURATION_COMPONENT_DATA ControllerKey;
     PCM_PARTIAL_RESOURCE_LIST PartialResourceList;
     PCM_PARTIAL_RESOURCE_DESCRIPTOR PartialDescriptor;
@@ -165,8 +161,6 @@ DetectDisplayController(PCONFIGURATION_COMPONENT_DATA BusKey)
 
     if (FrameBufferSize == 0)
         return;
-
-    strcpy(Buffer, "NV2A Framebuffer");
 
     Size = sizeof(CM_PARTIAL_RESOURCE_LIST);
     PartialResourceList = FrLdrHeapAlloc(Size, TAG_HW_RESOURCE_LIST);
@@ -193,20 +187,21 @@ DetectDisplayController(PCONFIGURATION_COMPONENT_DATA BusKey)
     FldrCreateComponentKey(BusKey,
                            ControllerClass,
                            DisplayController,
-                           0x0,
-                           0x0,
+                           Output | ConsoleOut,
+                           0,
                            0xFFFFFFFF,
-                           Buffer,
+                           "NV2A Framebuffer",
                            PartialResourceList,
                            Size,
                            &ControllerKey);
-
-    TRACE("Created key: DisplayController\\0\n");
 }
 
 static
 VOID
-DetectIsaBios(PCONFIGURATION_COMPONENT_DATA SystemKey, ULONG *BusNumber)
+DetectIsaBios(
+    _In_opt_ PCSTR Options,
+    _Inout_ PCONFIGURATION_COMPONENT_DATA SystemKey,
+    _Out_ ULONG *BusNumber)
 {
     PCM_PARTIAL_RESOURCE_LIST PartialResourceList;
     PCONFIGURATION_COMPONENT_DATA BusKey;
@@ -232,8 +227,8 @@ DetectIsaBios(PCONFIGURATION_COMPONENT_DATA SystemKey, ULONG *BusNumber)
     FldrCreateComponentKey(SystemKey,
                            AdapterClass,
                            MultiFunctionAdapter,
-                           0x0,
-                           0x0,
+                           0,
+                           0,
                            0xFFFFFFFF,
                            "ISA",
                            PartialResourceList,
@@ -245,7 +240,7 @@ DetectIsaBios(PCONFIGURATION_COMPONENT_DATA SystemKey, ULONG *BusNumber)
 
     /* Detect ISA/BIOS devices */
     DetectBiosDisks(SystemKey, BusKey);
-    DetectSerialPorts(BusKey, XboxGetSerialPort, MAX_XBOX_COM_PORTS);
+    DetectSerialPorts(Options, BusKey, XboxGetSerialPort, MAX_XBOX_COM_PORTS);
     DetectDisplayController(BusKey);
 
     /* FIXME: Detect more ISA devices */
@@ -268,7 +263,8 @@ XboxGetFloppyCount(VOID)
 }
 
 PCONFIGURATION_COMPONENT_DATA
-XboxHwDetect(VOID)
+XboxHwDetect(
+    _In_opt_ PCSTR Options)
 {
     PCONFIGURATION_COMPONENT_DATA SystemKey;
     ULONG BusNumber = 0;
@@ -276,15 +272,14 @@ XboxHwDetect(VOID)
     TRACE("DetectHardware()\n");
 
     /* Create the 'System' key */
-    FldrCreateSystemKey(&SystemKey);
-    FldrSetIdentifier(SystemKey, "Original Xbox (PC/AT like)");
+    FldrCreateSystemKey(&SystemKey, "Original Xbox (PC/AT like)");
 
     GetHarddiskConfigurationData = XboxGetHarddiskConfigurationData;
     FindPciBios = XboxFindPciBios;
 
     /* TODO: Build actual xbox's hardware configuration tree */
     DetectPciBios(SystemKey, &BusNumber);
-    DetectIsaBios(SystemKey, &BusNumber);
+    DetectIsaBios(Options, SystemKey, &BusNumber);
 
     TRACE("DetectHardware() Done\n");
     return SystemKey;
@@ -379,7 +374,6 @@ XboxPrepareForReactOS(VOID)
 {
     /* On Xbox, prepare video and disk support */
     XboxVideoPrepareForReactOS();
-    XboxDiskInit(FALSE);
     DiskStopFloppyMotor();
 
     /* Turn off debug messages to screen */

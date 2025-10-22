@@ -1,10 +1,9 @@
 /*
- * PROJECT:     PAINT for ReactOS
- * LICENSE:     LGPL
- * FILE:        base/applications/mspaint/toolbox.h
- * PURPOSE:     Window procedure of the main window and all children apart from
- *              hPalWin, hToolSettings and hSelection
- * PROGRAMMERS: Benedikt Freisen
+ * PROJECT:    PAINT for ReactOS
+ * LICENSE:    LGPL-2.0-or-later (https://spdx.org/licenses/LGPL-2.0-or-later)
+ * PURPOSE:    Window procedure of the main window and all children apart from
+ *             hPalWin, hToolSettings and hSelection
+ * COPYRIGHT:  Copyright 2015 Benedikt Freisen <b.freisen@gmx.net>
  */
 
 #pragma once
@@ -19,12 +18,13 @@ class CPaintToolBar : public CWindow
 {
 public:
     BOOL DoCreate(HWND hwndParent);
+    static LRESULT CALLBACK ToolBarWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
 
 class CToolBox : public CWindowImpl<CToolBox>
 {
 public:
-    DECLARE_WND_CLASS_EX(_T("ToolBox"), CS_DBLCLKS, COLOR_BTNFACE)
+    DECLARE_WND_CLASS_EX(L"ToolBox", CS_DBLCLKS, COLOR_BTNFACE)
 
     BEGIN_MSG_MAP(CToolBox)
         MESSAGE_HANDLER(WM_CREATE, OnCreate)

@@ -103,9 +103,9 @@ CTTY device\n\n\
             CON is usually the default standard I/O device.\n\n\
 To return control to the standard console, type: CTTY CON on the auxiliary\n\
 device."
-    STRING_DATE_HELP1 "\n輸入新的日期 (mm%cdd%cyyyy)："
-    STRING_DATE_HELP2 "\n輸入新的日期 (dd%cmm%cyyyy)："
-    STRING_DATE_HELP3 "\n輸入新的日期 (yyyy%cmm%cdd)："
+    STRING_DATE_HELP1 "輸入新的日期 (mm%cdd%cyyyy)： "
+    STRING_DATE_HELP2 "輸入新的日期 (dd%cmm%cyyyy)： "
+    STRING_DATE_HELP3 "輸入新的日期 (yyyy%cmm%cdd)： "
     STRING_DATE_HELP4 "顯示或者設定日期。\n\n\
 DATE [/T][日期]\n\n\
   /T    僅顯示\n\n\
@@ -169,10 +169,10 @@ DELAY [/m]n\n\n\
     STRING_DIR_HELP2 " 磁碟機 %c 中的磁碟區標籤是 %s\n"
     STRING_DIR_HELP3 " 磁碟機 %c 中的磁碟區沒有標籤。\n"
     STRING_DIR_HELP4 " 磁碟區的序列號是 %04X-%04X\n"
-    STRING_DIR_HELP5 "\n     總計：\n%16i 個檔案共佔據 % 14s 位元組\n"
-    STRING_DIR_HELP6 "%16i 個目錄 % 15s 位元組的可用空間\n"
+    STRING_DIR_HELP5 "\n     總計：\n%16i 個檔案共佔據 %14s 位元組\n"
+    STRING_DIR_HELP6 "%16i 個目錄 %14s 位元組的可用空間\n"
     STRING_DIR_HELP7 "\n %s 的目錄\n\n"
-    STRING_DIR_HELP8 "%16i 個檔案 % 14s 位元組\n"
+    STRING_DIR_HELP8 "%16i 個檔案 %14s 位元組\n"
     STRING_DIRSTACK_HELP1 "將目前的目錄存儲以便 POPD 命令使用，然後切換到指定的目錄。\n\n\
 PUSHD [路徑 | ..]\n\n\
   路徑          指定要切換到的目錄。\n"
@@ -237,7 +237,8 @@ ERRORLEVEL 數字    當上一個程式返回一個大於或等於指定數字�
 字元串1==字元串2   當所指定的字元串相匹配時為 TRUE。\n\
 EXIST 檔案名稱     當指定的檔案名稱存在時為 TRUE。\n\
 DEFINED 變數       當指定的變數已被定義時為 TRUE。\n"
-    STRING_LOCALE_HELP1 "目前的時間是"
+    STRING_DATE_NOW "The current date is: "
+    STRING_TIME_NOW "目前的時間是： "
     STRING_MKDIR_HELP "建立一個目錄。\n\n\
 MKDIR [磁碟機:]路徑\nMD [磁碟機:]路徑"
     STRING_MKLINK_HELP "建立一個檔案系統連結物件。\n\n\
@@ -325,27 +326,6 @@ REN [/E /N /P /Q /S /T] 舊名稱 ... 新名稱\n\n\
 記住您不能在目的地裡指定新的磁碟機或路徑。使用 MOVE 命令來達成這個目的。\n"
     STRING_REN_HELP2 "    已重新命名 %lu 個檔案\n"
     STRING_REN_HELP3 "    已重新命名 %lu 個檔案\n"
-    STRING_REPLACE_HELP1 "取代檔案。\n\n\
-REPLACE [磁碟機1:][路徑1]檔案名稱 [磁碟機2:][路徑2] [/A] [/P] [/R] [/W]\n\
-REPLACE [磁碟機1:][路徑1]檔案名稱 [磁碟機2:][路徑2] [/P] [/R] [/S] [/W] [/U]\n\n\
-  [磁碟機1:][路徑1]檔案名稱    指定一個或多個原始檔。\n\
-  [磁碟機2:][路徑2]            指定要被取代檔案所在的目錄。\n\
-  /A                           將新檔案新增到目標目錄。不能和 /S 或 /U 同時使用。\n\
-  /P                           在取代一個檔案或新增一個原始檔之前請求確認。\n\
-  /R                           將只讀檔案視為未保護檔案並取代。\n\
-  /S                           取代目標目錄中所有子目錄中的檔案。不能與 /A 同時使用。\n\
-  /W                           在開始前等待您插入一張磁碟。\n\
-  /U                           僅取代(更新)比原檔案舊的檔案。不能和 /A 同時使用。\n"
-    STRING_REPLACE_HELP2 "需要來源路徑\n"
-    STRING_REPLACE_HELP3 "沒有檔案被取代\n"
-    STRING_REPLACE_HELP4 "%lu 個檔案已被取代\n"
-    STRING_REPLACE_HELP5 "正在取代 %s\n"
-    STRING_REPLACE_HELP6 "取代 %s\n"
-    STRING_REPLACE_HELP7 "沒有檔案被新增\n"
-    STRING_REPLACE_HELP8 "%lu 個檔案已被新增\n"
-    STRING_REPLACE_HELP9 "新增 %s 嗎 (Y/N)？"
-    STRING_REPLACE_HELP10 "取代 %s 嗎 (Y/N)？"
-    STRING_REPLACE_HELP11 "正在新增 %s\n"
     STRING_SHIFT_HELP "在批次檔案中改變可取代參數的位置。\n\n\
 SHIFT [DOWN]"
     STRING_SCREEN_HELP "移動游標並且可選擇輸出文字\n\n\
@@ -377,7 +357,7 @@ TITLE [字串]\n\n\
 TIME [/T][時間]\n\n\
   /T    僅顯示\n\n\
 執行不帶參數的 TIME 將會顯示目前的時間設定並且提示設定新的時間。按下 ENTER 鍵來保持原有設定。\n"
-    STRING_TIME_HELP2 "輸入新的時間："
+    STRING_TIME_HELP2 "輸入新的時間： "
     STRING_TIMER_HELP1 "已過去 %d 毫秒\n"
     STRING_TIMER_HELP2 "已過去 %02d%c%02d%c%02d%c%02d\n"
     STRING_TIMER_HELP3 "允許使用最多十個計時器。\n\n\
@@ -453,23 +433,23 @@ RESTORE       恢復視窗\n\
     STRING_CMD_ERROR3 "無法重定向到檔案 %s\n"
     STRING_CMD_ERROR4 "正在運行 %s...\n"
     STRING_CMD_ERROR5 "正在運行 cmdexit.bat...\n"
-    STRING_COLOR_ERROR1 "同樣顏色錯誤！ (背景和前景不能同色)"
-    STRING_COLOR_ERROR2 "顏色指定錯誤"
+    STRING_COLOR_ERROR1 "同樣顏色錯誤！ (背景和前景不能同色)\n"
+    STRING_COLOR_ERROR2 "顏色指定錯誤\n"
     STRING_CONSOLE_ERROR "未知錯誤：%d\n"
     STRING_COPY_ERROR1 "錯誤：無法開啟來源 - %s！\n"
     STRING_COPY_ERROR2 "錯誤：無法複製到自身！\n"
     STRING_COPY_ERROR3 "寫入目的時出錯！\n"
     STRING_COPY_ERROR4 "錯誤：尚未實現！\n"
-    STRING_DATE_ERROR "無效的日期。"
+    STRING_DATE_ERROR "無效的日期。\n"
     STRING_DEL_ERROR5 "檔案 %s 將會被刪除！"
     STRING_DEL_ERROR6 "您確定嗎 (Y/N)？ "
     STRING_DEL_ERROR7 "正在刪除：%s\n"
     STRING_ERROR_ERROR1 "未知錯誤！錯誤碼：0x%lx\n"
     STRING_ERROR_ERROR2 "語法錯誤"
-    STRING_FOR_ERROR1 "語句中缺少 'in'。"
-    STRING_FOR_ERROR2 "沒有發現括號。"
-    STRING_FOR_ERROR3 "缺少 'do'。"
-    STRING_FOR_ERROR4 "'do' 後沒有命令。"
+    STRING_FOR_ERROR1 "語句中缺少 'in'。\n"
+    STRING_FOR_ERROR2 "沒有發現括號。\n"
+    STRING_FOR_ERROR3 "缺少 'do'。\n"
+    STRING_FOR_ERROR4 "'do' 後沒有命令。\n"
     STRING_FREE_ERROR1 "無效的磁碟機"
     STRING_FREE_ERROR2 "未標記"
     STRING_GOTO_ERROR1 "沒有為 GOTO 指定標籤\n"
@@ -478,10 +458,10 @@ RESTORE       恢復視窗\n\
     STRING_MD_ERROR2 "新資料夾的路徑不存在。\n"
     STRING_MOVE_ERROR1 "[成功]\n"
     STRING_MOVE_ERROR2 "[錯誤]\n"
-    STRING_REN_ERROR1 "MoveFile() 失敗。錯誤碼：%lu\n"
-    STRING_TIME_ERROR1 "無效的時間。"
-    STRING_TYPE_ERROR1 "無效的選項 '/%s'\n"
-    STRING_WINDOW_ERROR1 "找不到視窗"
+    STRING_REN_ERROR "MoveFile() 失敗。錯誤碼：%lu\n"
+    STRING_TIME_ERROR "無效的時間。\n"
+    STRING_TYPE_ERROR "無效的選項 '/%s'\n"
+    STRING_WINDOW_ERROR "找不到視窗\n"
     STRING_ERROR_PARAMETERF_ERROR "參數格式不正確 - %c\n"
     STRING_ERROR_INVALID_SWITCH "無效的開關 - /%c\n"
     STRING_ERROR_TOO_MANY_PARAMETERS "太多參數 - %s\n"
@@ -495,24 +475,25 @@ RESTORE       恢復視窗\n\
     STRING_ERROR_CANNOTPIPE "錯誤！無法建立管道！不能開啟臨時檔案！\n"
     STRING_ERROR_D_PAUSEMSG "按任意鍵繼續... "
     STRING_ERROR_DRIVER_NOT_READY "磁碟機未就緒"
+    STRING_ERROR_INVALID_NUMBER1 "Invalid number. Numeric constants are either decimal (42), hexadecimal (0x2A), or octal (052).\n"
+    STRING_ERROR_INVALID_NUMBER2 "Invalid number. Numbers are limited to 32-bits of precision.\n"
+    STRING_ERROR_DIVISION_BY_ZERO "Division by zero error.\n"
+    STRING_ERROR_INVALID_DEVICE L"Invalid device '%s'\n"
+    STRING_ERROR_CALL_BAD_LABEL "Invalid attempt to call batch label outside of batch script.\n"
+    STRING_ERROR_UNEXPECTED "%s was unexpected.\n"
+    STRING_ERROR_WHILE_PROCESSING "Error occurred while processing: %s.\n"
     STRING_SET_ENV_ERROR "環境變數 '%s' 尚未定義\n"
-    STRING_REPLACE_ERROR1 "無效開關 - %s\n"
-    STRING_REPLACE_ERROR2 "找不到路徑 - %s\n"
-    STRING_REPLACE_ERROR3 "檔案名稱、目錄名稱或磁碟區標籤語法不正確。\n"
-    STRING_REPLACE_ERROR4 "無效的參陣組合\n"
-    STRING_REPLACE_ERROR5 "存取被拒 - %s\n"
-    STRING_REPLACE_ERROR6 "找不到檔案 - %s\n"
-    STRING_REPLACE_ERROR7 "擴展錯誤 32\n"
     STRING_CMD_INFOLINE "  ReactOS 命令列直譯器                                       輸入 HELP = 說明  "
+    STRING_CMD_COPYRIGHT "(C) Copyright 1996-%s ReactOS Team.\n"
     STRING_REACTOS_VERSION "ReactOS [版本 %s %s]\n"
     STRING_CMD_SHELLINFO "\nReactOS 命令列直譯器\n版本 %s %s"
     STRING_VERSION_RUNNING_ON "在 上運行"
     STRING_VERSION_RUNVER "%s [Version %d.%d.%d] %s"
     STRING_COPY_FILE "        %d 個檔案已複製\n"
     STRING_DELETE_WIPE "已擦除"
-    STRING_FOR_ERROR "無效的變數指定。"
-    STRING_SCREEN_COL "無效的行值"
-    STRING_SCREEN_ROW "無效的列值"
+    STRING_FOR_ERROR "無效的變數指定。\n"
+    STRING_SCREEN_COL "無效的行值\n"
+    STRING_SCREEN_ROW "無效的列值\n"
     STRING_TIMER_TIME "計時器 %d 是 %s："
     STRING_MKLINK_CREATED_SYMBOLIC "已為 %s <<===>> %s 建立符號連結\n"
     STRING_MKLINK_CREATED_HARD "已為 %s <<===>> %s 建立硬連結\n"

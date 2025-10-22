@@ -33,6 +33,7 @@ BEGIN
     IDS_RESOURCE_INTERRUPT "IRQ"
     IDS_RESOURCE_DMA "DMA"
     IDS_RESOURCE_PORT "Диапазон I/O"
+    IDS_COPY "&Копировать"
 END
 
 /* error messages, source: http://www.z123.org/techsupport/medm.htm */
@@ -75,7 +76,7 @@ BEGIN
     IDS_DEV_FAILED_INSTALL "Драйверы для этого устройства не установлены."
     IDS_DEV_HARDWARE_DISABLED "Это устройство отключено, поскольку BIOS устройства не предоставил никаких ресурсов."
     IDS_DEV_CANT_SHARE_IRQ "Это устройство использует IRQ-ресурс, который используется другим устройством и не может быть общим.\nВы должны изменить конфликтную настройку или удалить драйвер реального режима, создающий конфликт."
-    IDS_DEV_FAILED_ADD "Устройство работает неправильно, поскольку %1 неисправен."
+    IDS_DEV_FAILED_ADD "This device is not working properly because ReactOS cannot load the drivers required for this device."
     IDS_DEV_DISABLED_SERVICE "ReactOS не может установить драйвера для этого устройства, потому что не может получить доступ к месту расположения установочных файлов."
     IDS_DEV_TRANSLATION_FAILED "Это устройство не отвечает своему драйверу."
     IDS_DEV_NO_SOFTCONFIG "ReactOS не удалось определить настройки для этого устройства. Ознакомтесь с его документацией и воспользуйтесь вкладкой Ресурсы для настройки."
@@ -274,7 +275,7 @@ BEGIN
     BEGIN
         MENUITEM "&Устройства по типу",          IDM_DEVBYTYPE
         MENUITEM "Устройства по под&ключению",   IDM_DEVBYCONN
-        MENUITEM "&Ресурсы по типу",             IDM_RESBYTYPE, GRAYED
+        MENUITEM "&Ресурсы по типу",             IDM_RESBYTYPE
         MENUITEM "Ресурсы по подк&лючению",      IDM_RESBYCONN, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Показать &скрытые устройства", IDM_SHOWHIDDEN
@@ -286,14 +287,15 @@ BEGIN
 END
 
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_APPNAME               "Диспетчер устройств ReactOS"
   IDS_APP_AUTHORS           "Copyright 2015 Ged Murphy"
   IDS_CONFIRM_DISABLE       "Отключение устройства означает, что оно перестанет работать.\nОтключить устройство?"
   IDS_CONFIRM_UNINSTALL     "Предупреждение: Сейчас устройство будет удалено из системы.\nВы хотите продолжить?"
 END
-STRINGTABLE DISCARDABLE
+
+STRINGTABLE
 BEGIN
   IDS_MENU_UPDATE           "&Обновить драйвер..."
   IDS_MENU_ENABLE           "&Включить"
@@ -304,7 +306,7 @@ BEGIN
   IDS_MENU_PROPERTIES       "&Свойства"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_TOOLTIP_PROPERTIES    "Свойства"
   IDS_TOOLTIP_SCAN          "Обновить конфигурацию оборудования"
@@ -314,8 +316,16 @@ BEGIN
   IDS_TOOLTIP_UNINSTALL     "Удалить"
 END
 
+STRINGTABLE
+BEGIN
+  IDS_TYPE_MEMORY           "Memory"
+  IDS_TYPE_PORT             "Input/output (IO)"
+  IDS_TYPE_DMA              "Direct Memory Access (DMA)"
+  IDS_TYPE_IRQ              "Interrupt request (IRQ)"
+END
+
 /* Hints */
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_HINT_BLANK        " "
   IDS_HINT_PROPERTIES   " Открытие страницы свойств для выделенного объекта."

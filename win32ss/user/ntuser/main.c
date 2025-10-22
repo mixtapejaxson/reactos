@@ -8,6 +8,7 @@
 
 #include <win32k.h>
 #include <napi.h>
+#include <winbase_undoc.h>
 
 #define NDEBUG
 #include <debug.h>
@@ -26,7 +27,6 @@ NTSTATUS GdiThreadDestroy(PETHREAD Thread);
 
 PSERVERINFO gpsi = NULL; // Global User Server Information.
 
-USHORT gusLanguageID;
 PPROCESSINFO ppiScrnSaver;
 PPROCESSINFO gppiList = NULL;
 
@@ -452,7 +452,6 @@ UserThreadDestroy(PETHREAD Thread)
     return STATUS_SUCCESS;
 }
 
-/* Win: xxxCreateThreadInfo */
 NTSTATUS NTAPI
 InitThreadCallback(PETHREAD Thread)
 {
@@ -464,6 +463,7 @@ InitThreadCallback(PETHREAD Thread)
     PTEB pTeb;
     PRTL_USER_PROCESS_PARAMETERS ProcessParams;
     PKL pDefKL;
+    BOOLEAN bFirstThread;
 
     Process = Thread->ThreadsProcess;
 
@@ -488,6 +488,7 @@ InitThreadCallback(PETHREAD Thread)
     pTeb->Win32ThreadInfo = ptiCurrent;
     ptiCurrent->pClientInfo = (PCLIENTINFO)pTeb->Win32ClientInfo;
     ptiCurrent->pcti = &ptiCurrent->cti;
+    bFirstThread = !(ptiCurrent->ppi->W32PF_flags & W32PF_THREADCONNECTED);
 
     /* Mark the process as having threads */
     ptiCurrent->ppi->W32PF_flags |= W32PF_THREADCONNECTED;
@@ -557,6 +558,13 @@ InitThreadCallback(PETHREAD Thread)
         pci->CodePage = pDefKL->CodePage;
     }
 
+    /* Populate dwExpWinVer */
+    if (Process->Peb)
+        ptiCurrent->dwExpWinVer = RtlGetExpWinVer(Process->SectionBaseAddress);
+    else
+        ptiCurrent->dwExpWinVer = WINVER_WINNT4;
+    pci->dwExpWinVer = ptiCurrent->dwExpWinVer;
+
     /* Need to pass the user Startup Information to the current process. */
     if ( ProcessParams )
     {
@@ -573,6 +581,25 @@ InitThreadCallback(PETHREAD Thread)
              ptiCurrent->ppi->usi.wShowWindow = (WORD)ProcessParams->ShowWindowFlags;
           }
        }
+
+        if (bFirstThread)
+        {
+            /* Note: Only initialize once so it can be set back to 0 after being used */
+            if (ProcessParams->WindowFlags & STARTF_USEHOTKEY)
+                ptiCurrent->ppi->dwHotkey = HandleToUlong(ProcessParams->StandardInput);
+            /* TODO:
+            else if (ProcessParams->ShellInfo.Buffer)
+                ..->dwHotkey = ParseShellInfo(ProcessParams->ShellInfo.Buffer, L"hotkey.");
+            */
+
+            if (ProcessParams->WindowFlags & STARTF_SHELLPRIVATE)
+            {
+              /* We need to validate this handle because it can also be a HICON */
+                HMONITOR hMonitor = (HMONITOR)ProcessParams->StandardOutput;
+                if (hMonitor && UserGetMonitorObject(hMonitor))
+                    ptiCurrent->ppi->hMonitor = hMonitor;
+            }
+        }
     }
 
     /*
@@ -808,6 +835,9 @@ ExitThreadCallback(PETHREAD Thread)
             UserDereferenceObject(ref->obj);
 
             psle = PopEntryList(&ptiCurrent->ReferencesList);
+#if DBG
+            ptiCurrent->cRefObjectCo--;
+#endif
         }
     }
 
@@ -867,6 +897,8 @@ ExitThreadCallback(PETHREAD Thread)
     }
     ptiCurrent->hEventQueueClient = NULL;
 
+    ASSERT(ptiCurrent->cRefObjectCo == 0);
+
     /* The thread is dying */
     PsSetThreadWin32Thread(Thread /*ptiCurrent->pEThread*/, NULL, ptiCurrent);
 
@@ -909,8 +941,10 @@ DriverUnload(IN PDRIVER_OBJECT DriverObject)
 {
     // TODO: Do more cleanup!
 
+    FreeFontSupport();
     ResetCsrApiPort();
     ResetCsrProcess();
+    IntWin32PowerManagementCleanup();
 }
 
 // Return on failure
@@ -978,8 +1012,8 @@ DriverEntry(
     CalloutData.ProcessCallout = Win32kProcessCallback;
     CalloutData.ThreadCallout = Win32kThreadCallback;
     // CalloutData.GlobalAtomTableCallout = NULL;
-    // CalloutData.PowerEventCallout = NULL;
-    // CalloutData.PowerStateCallout = NULL;
+    CalloutData.PowerEventCallout = IntHandlePowerEvent;
+    CalloutData.PowerStateCallout = IntHandlePowerState;
     // CalloutData.JobCallout = NULL;
     CalloutData.BatchFlushRoutine = NtGdiFlushUserBatch;
     CalloutData.DesktopOpenProcedure = IntDesktopObjectOpen;
@@ -1050,15 +1084,6 @@ DriverEntry(
     NT_ROF(MsqInitializeImpl());
     NT_ROF(InitTimerImpl());
     NT_ROF(InitDCEImpl());
-
-    gusLanguageID = UserGetLanguageID();
-
-    /* Initialize FreeType library */
-    if (!InitFontSupport())
-    {
-        DPRINT1("Unable to initialize font support\n");
-        return Status;
-    }
 
     return STATUS_SUCCESS;
 }

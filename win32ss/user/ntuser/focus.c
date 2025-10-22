@@ -7,7 +7,7 @@
  */
 
 #include <win32k.h>
-#include <ddk/immdev.h>
+#include <immdev.h>
 DBG_DEFAULT_CHANNEL(UserFocus);
 
 PUSER_MESSAGE_QUEUE gpqForeground = NULL;
@@ -19,35 +19,34 @@ PTHREADINFO ptiLastInput = NULL;
 HWND ghwndOldFullscreen = NULL;
 
 /*
-  Check locking of a process or one or more menus are active.
-*/
+ * Check locking of a process or one or more menus are active.
+ */
 BOOL FASTCALL
 IsFGLocked(VOID)
 {
-   return (gppiLockSFW || guSFWLockCount);
+    return (gppiLockSFW || guSFWLockCount);
 }
 
 /*
-  Get capture window via foreground Queue.
-*/
+ * Get capture window via foreground Queue.
+ */
 HWND FASTCALL
 IntGetCaptureWindow(VOID)
 {
-   PUSER_MESSAGE_QUEUE ForegroundQueue = IntGetFocusMessageQueue();
-   return ( ForegroundQueue ? (ForegroundQueue->spwndCapture ? UserHMGetHandle(ForegroundQueue->spwndCapture) : 0) : 0);
+    PUSER_MESSAGE_QUEUE ForegroundQueue = IntGetFocusMessageQueue();
+    if (!ForegroundQueue)
+        return NULL;
+    return (ForegroundQueue->spwndCapture ? UserHMGetHandle(ForegroundQueue->spwndCapture) : NULL);
 }
 
 HWND FASTCALL
 IntGetThreadFocusWindow(VOID)
 {
-   PTHREADINFO pti;
-   PUSER_MESSAGE_QUEUE ThreadQueue;
-
-   pti = PsGetCurrentThreadWin32Thread();
-   ThreadQueue = pti->MessageQueue;
-   if (!ThreadQueue)
-     return NULL;
-   return ThreadQueue->spwndFocus ? UserHMGetHandle(ThreadQueue->spwndFocus) : 0;
+    PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
+    PUSER_MESSAGE_QUEUE ThreadQueue = pti->MessageQueue;
+    if (!ThreadQueue)
+        return NULL;
+    return (ThreadQueue->spwndFocus ? UserHMGetHandle(ThreadQueue->spwndFocus) : NULL);
 }
 
 BOOL FASTCALL IntIsWindowFullscreen(PWND Window)
@@ -56,7 +55,7 @@ BOOL FASTCALL IntIsWindowFullscreen(PWND Window)
     PMONITOR pMonitor;
 
     if (!Window || !(Window->style & WS_VISIBLE) || (Window->style & WS_CHILD) ||
-        (Window->ExStyle & WS_EX_TOOLWINDOW) || !IntGetWindowRect(Window, &rclWindow))
+        !IntGetWindowRect(Window, &rclWindow))
     {
         return FALSE;
     }
@@ -242,7 +241,7 @@ IntDeactivateWindow(PTHREADINFO pti, HANDLE tid)
    if ( pti->MessageQueue->spwndActive )
    {
       pwndPrev = pti->MessageQueue->spwndActive;
-      ptiPrev = pwndPrev->head.pti; 
+      ptiPrev = pwndPrev->head.pti;
 
       if (!co_IntSendDeactivateMessages(UserHMGetHandle(pwndPrev), 0, TRUE))
       {
@@ -341,6 +340,9 @@ IntDeactivateWindow(PTHREADINFO pti, HANDLE tid)
       UserDerefObjectCo(pwndFocus);
    }
 
+   /* Check for keyboard modifiers and release them (CORE-14768) */
+   MsqReleaseModifierKeys(pti->MessageQueue);
+
    if (InAAPM) pti->TIF_flags &= ~TIF_INACTIVATEAPPMSG;
    if (ptiCurrent != pti)
    {
@@ -403,7 +405,7 @@ IntActivateWindow(PWND Wnd, PTHREADINFO pti, HANDLE tid, DWORD Type)
       {
            Wnd = pmq->spwndActive; // Use active window from current queue.
 
-           UserRefObjectCo(Wnd, &Ref);                 
+           UserRefObjectCo(Wnd, &Ref);
 
            co_IntSendMessage( UserHMGetHandle(Wnd), WM_NCACTIVATE, TRUE, 0);
 
@@ -433,7 +435,7 @@ co_IntMakeWindowActive(PWND Window)
       {
          spwndOwner = spwndOwner->spwndOwner;
       }
-      spwndOwner->spwndLastActive = Window;
+      WndSetLastActive(spwndOwner, Window);
       return TRUE;
    }
    ERR("MakeWindowActive Failed!\n");
@@ -789,7 +791,7 @@ co_IntSetForegroundMessageQueue(
       ptiChg = Wnd->head.pti;
       IntSetFocusMessageQueue(Wnd->head.pti->MessageQueue);
       gptiForeground = Wnd->head.pti;
-      //ERR("Set Foreground pti 0x%p Q 0x%p hWnd 0x%p\n",Wnd->head.pti, Wnd->head.pti->MessageQueue,Wnd->head.h);
+      //ERR("Set Foreground pti 0x%p Q 0x%p hWnd 0x%p\n", Wnd->head.pti, Wnd->head.pti->MessageQueue, UserHMGetHandle(Wnd));
    }
    else
    {
@@ -830,7 +832,7 @@ co_IntSetForegroundMessageQueue(
               MsqPostMessage(ptiPrev, &Msg, FALSE, QS_EVENT, POSTEVENT_DAW, (LONG_PTR)tid);
           }
       }
-      
+
       pumqChg = NULL;
       if ( ptiChg && !(ptiChg->TIF_flags & TIF_INCLEANUP) )
       {
@@ -879,7 +881,7 @@ co_IntSetForegroundMessageQueue(
               }
               else
               {
-                 //ERR("SFWAMQ : SAW I pti 0x%p hWnd 0x%p\n",ptiChg,Wnd->head.h);
+                 //ERR("SFWAMQ : SAW I pti 0x%p hWnd 0x%p\n", ptiChg, Wnd ? UserHMGetHandle(Wnd) : NULL);
                  Ret = co_IntSetActiveWindow(Wnd, MouseActivate, TRUE/*Type*/, FALSE);
                  //if (!Ret) ERR("SFWAMQ : ISAW : return error\n");
                  return Ret;
@@ -898,7 +900,7 @@ co_IntSetForegroundMessageQueue(
       if ( pumqPrev && pumq == pumqPrev )
       {
           HANDLE tid = Wnd ? PsGetThreadId(Wnd->head.pti->pEThread) : NULL;
-          //ERR("SFWAMQ : DAW I pti 0x%p tid 0x%p hWnd 0x%p\n",ptiPrev,tid,Wnd ? Wnd->head.h : 0);
+          //ERR("SFWAMQ : DAW I pti 0x%p tid 0x%p hWnd 0x%p\n", ptiPrev, tid, Wnd ? UserHMGetHandle(Wnd) : NULL);
           IntDeactivateWindow(pti, tid);
       }
    }
@@ -1287,7 +1289,7 @@ UserSetActiveWindow( _In_opt_ PWND Wnd )
       !(gpqForegroundPrev->spwndActivePrev->state2 & WNDS2_BOTTOMMOST) &&
        (Wnd = VerifyWnd(gpqForegroundPrev->spwndActivePrev)) != NULL )
   {
-     TRACE("USAW:PAW hwnd %p\n",Wnd?Wnd->head.h:NULL);
+     TRACE("USAW:PAW hwnd %p\n", UserHMGetHandle(Wnd));
      return IntUserSetActiveWindow(Wnd, FALSE, TRUE, FALSE);
   }
 
@@ -1295,7 +1297,7 @@ UserSetActiveWindow( _In_opt_ PWND Wnd )
   if ( pti->MessageQueue->spwndActive &&
       (Wnd = VerifyWnd(pti->MessageQueue->spwndActive)) != NULL )
   {
-      //ERR("USAW:AOWM hwnd %p\n",Wnd?Wnd->head.h:NULL);
+      //ERR("USAW:AOWM hwnd %p\n", UserHMGetHandle(Wnd));
       if (!ActivateOtherWindowMin(Wnd))
       {
          // Okay, now go find someone else to play with!
@@ -1351,7 +1353,7 @@ co_UserSetFocus(PWND Window)
          if (pwndTop->spwndParent == NULL) break;
       }
       ////
-      if (co_HOOK_CallHooks( WH_CBT, HCBT_SETFOCUS, (WPARAM)Window->head.h, (LPARAM)hWndPrev))
+      if (co_HOOK_CallHooks( WH_CBT, HCBT_SETFOCUS, (WPARAM)UserHMGetHandle(Window), (LPARAM)hWndPrev))
       {
          ERR("SetFocus 1 WH_CBT Call Hook return!\n");
          return 0;
@@ -1401,7 +1403,7 @@ co_UserSetFocus(PWND Window)
 
       IntSendFocusMessages( pti, Window);
 
-      TRACE("Focus: %p -> %p\n", hWndPrev, Window->head.h);
+      TRACE("Focus: %p -> %p\n", hWndPrev, UserHMGetHandle(Window));
    }
    else /* NULL hwnd passed in */
    {
@@ -1420,20 +1422,19 @@ co_UserSetFocus(PWND Window)
 HWND FASTCALL
 UserGetForegroundWindow(VOID)
 {
-   PUSER_MESSAGE_QUEUE ForegroundQueue;
-
-   ForegroundQueue = IntGetFocusMessageQueue();
-   return( ForegroundQueue ? (ForegroundQueue->spwndActive ? UserHMGetHandle(ForegroundQueue->spwndActive) : 0) : 0);
+    PUSER_MESSAGE_QUEUE ForegroundQueue = IntGetFocusMessageQueue();
+    if (!ForegroundQueue)
+        return NULL;
+    return (ForegroundQueue->spwndActive ? UserHMGetHandle(ForegroundQueue->spwndActive) : NULL);
 }
 
 HWND FASTCALL UserGetActiveWindow(VOID)
 {
-   PTHREADINFO pti;
-   PUSER_MESSAGE_QUEUE ThreadQueue;
-
-   pti = PsGetCurrentThreadWin32Thread();
-   ThreadQueue = pti->MessageQueue;
-   return( ThreadQueue ? (ThreadQueue->spwndActive ? UserHMGetHandle(ThreadQueue->spwndActive) : 0) : 0);
+    PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
+    PUSER_MESSAGE_QUEUE ThreadQueue = pti->MessageQueue;
+    if (!ThreadQueue)
+        return NULL;
+    return (ThreadQueue->spwndActive ? UserHMGetHandle(ThreadQueue->spwndActive) : NULL);
 }
 
 HWND APIENTRY
@@ -1441,17 +1442,16 @@ IntGetCapture(VOID)
 {
    PTHREADINFO pti;
    PUSER_MESSAGE_QUEUE ThreadQueue;
-   DECLARE_RETURN(HWND);
+   HWND Ret;
 
    TRACE("Enter IntGetCapture\n");
 
    pti = PsGetCurrentThreadWin32Thread();
    ThreadQueue = pti->MessageQueue;
-   RETURN( ThreadQueue ? (ThreadQueue->spwndCapture ? UserHMGetHandle(ThreadQueue->spwndCapture) : 0) : 0);
+   Ret = ((ThreadQueue && ThreadQueue->spwndCapture) ? UserHMGetHandle(ThreadQueue->spwndCapture) : NULL);
 
-CLEANUP:
-   TRACE("Leave IntGetCapture, ret=%p\n", _ret_);
-   END_CLEANUP;
+   TRACE("Leave IntGetCapture, ret=%p\n", Ret);
+   return Ret;
 }
 
 HWND FASTCALL
@@ -1647,17 +1647,16 @@ IntAllowSetForegroundWindow(DWORD dwProcessId)
 HWND APIENTRY
 NtUserGetForegroundWindow(VOID)
 {
-   DECLARE_RETURN(HWND);
+   HWND Ret;
 
    TRACE("Enter NtUserGetForegroundWindow\n");
    UserEnterExclusive();
 
-   RETURN( UserGetForegroundWindow());
+   Ret = UserGetForegroundWindow();
 
-CLEANUP:
-   TRACE("Leave NtUserGetForegroundWindow, ret=%p\n",_ret_);
+   TRACE("Leave NtUserGetForegroundWindow, ret=%p\n", Ret);
    UserLeave();
-   END_CLEANUP;
+   return Ret;
 }
 
 HWND APIENTRY
@@ -1666,7 +1665,7 @@ NtUserSetActiveWindow(HWND hWnd)
    USER_REFERENCE_ENTRY Ref;
    HWND hWndPrev;
    PWND Window, pwndPrev;
-   DECLARE_RETURN(HWND);
+   HWND Ret = NULL;
 
    TRACE("Enter NtUserSetActiveWindow(%p)\n", hWnd);
    UserEnterExclusive();
@@ -1677,7 +1676,7 @@ NtUserSetActiveWindow(HWND hWnd)
       if (!(Window = UserGetWindowObject(hWnd)))
       {
          ERR("NtUserSetActiveWindow: Invalid handle 0x%p!\n",hWnd);
-         RETURN( NULL);
+         goto Exit; // Return NULL
       }
    }
 
@@ -1689,14 +1688,13 @@ NtUserSetActiveWindow(HWND hWnd)
       if (Window) UserRefObjectCo(Window, &Ref);
       UserSetActiveWindow(Window);
       if (Window) UserDerefObjectCo(Window);
-      RETURN(hWndPrev ? (IntIsWindow(hWndPrev) ? hWndPrev : NULL) : NULL);
+      Ret = ((hWndPrev && IntIsWindow(hWndPrev)) ? hWndPrev : NULL);
    }
-   RETURN( NULL);
 
-CLEANUP:
-   TRACE("Leave NtUserSetActiveWindow, ret=%p\n",_ret_);
+Exit:
+   TRACE("Leave NtUserSetActiveWindow, ret=%p\n", Ret);
    UserLeave();
-   END_CLEANUP;
+   return Ret;
 }
 
 /*
@@ -1705,17 +1703,16 @@ CLEANUP:
 HWND APIENTRY
 NtUserSetCapture(HWND hWnd)
 {
-   DECLARE_RETURN(HWND);
+   HWND Ret;
 
    TRACE("Enter NtUserSetCapture(%p)\n", hWnd);
    UserEnterExclusive();
 
-   RETURN( co_UserSetCapture(hWnd));
+   Ret = co_UserSetCapture(hWnd);
 
-CLEANUP:
-   TRACE("Leave NtUserSetCapture, ret=%p\n", _ret_);
+   TRACE("Leave NtUserSetCapture, ret=%p\n", Ret);
    UserLeave();
-   END_CLEANUP;
+   return Ret;
 }
 
 /*
@@ -1726,8 +1723,7 @@ NtUserSetFocus(HWND hWnd)
 {
    PWND Window;
    USER_REFERENCE_ENTRY Ref;
-   DECLARE_RETURN(HWND);
-   HWND ret;
+   HWND ret = NULL;
 
    TRACE("Enter NtUserSetFocus(%p)\n", hWnd);
    UserEnterExclusive();
@@ -1737,24 +1733,22 @@ NtUserSetFocus(HWND hWnd)
       if (!(Window = UserGetWindowObject(hWnd)))
       {
          ERR("NtUserSetFocus: Invalid handle 0x%p!\n",hWnd);
-         RETURN(NULL);
+         goto Exit; // Return NULL
       }
 
       UserRefObjectCo(Window, &Ref);
       ret = co_UserSetFocus(Window);
       UserDerefObjectCo(Window);
-
-      RETURN(ret);
    }
    else
    {
-      RETURN( co_UserSetFocus(0));
+      ret = co_UserSetFocus(NULL);
    }
 
-CLEANUP:
-   TRACE("Leave NtUserSetFocus, ret=%p\n",_ret_);
+Exit:
+   TRACE("Leave NtUserSetFocus, ret=%p\n", ret);
    UserLeave();
-   END_CLEANUP;
+   return ret;
 }
 
 /* EOF */

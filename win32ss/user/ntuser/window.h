@@ -80,7 +80,7 @@ LONG_PTR FASTCALL co_UserSetWindowLongPtr(HWND, DWORD, LONG_PTR, BOOL);
 HWND FASTCALL IntGetWindow(HWND,UINT);
 LRESULT co_UserFreeWindow(PWND,PPROCESSINFO,PTHREADINFO,BOOLEAN);
 
-#define HWND_TERMINATOR ((HWND)(ULONG_PTR)1)
+#define HWND_TERMINATOR ((HWND)UlongToHandle(1))
 
 typedef struct tagWINDOWLIST
 {
@@ -117,31 +117,74 @@ HWND FASTCALL IntFindWindow(PWND Parent, PWND ChildAfter, RTL_ATOM ClassAtom,
 
 extern BOOL gfIMEShowStatus;
 
-BOOL FASTCALL IntWantImeWindow(PWND pwndTarget);
-PWND FASTCALL co_IntCreateDefaultImeWindow(PWND pwndTarget, HINSTANCE hInst);
-BOOL FASTCALL IntImeCanDestroyDefIMEforChild(PWND pImeWnd, PWND pwndTarget);
-BOOL FASTCALL IntImeCanDestroyDefIME(PWND pImeWnd, PWND pwndTarget);
-BOOL FASTCALL IntBroadcastImeShowStatusChange(PWND pImeWnd, BOOL bShow);
-VOID FASTCALL IntNotifyImeShowStatus(PWND pImeWnd);
-VOID FASTCALL IntCheckImeShowStatusInThread(PWND pImeWnd);
+BOOL FASTCALL IntWantImeWindow(_In_ PWND pwndTarget);
+PWND FASTCALL co_IntCreateDefaultImeWindow(_In_ PWND pwndTarget, _In_ HINSTANCE hInst);
+BOOL FASTCALL IntImeCanDestroyDefIMEforChild(_In_ PWND pImeWnd, _In_ PWND pwndTarget);
+BOOL FASTCALL IntImeCanDestroyDefIME(_In_ PWND pImeWnd, _In_ PWND pwndTarget);
+BOOL FASTCALL IntBroadcastImeShowStatusChange(_In_ PWND pImeWnd, _In_ BOOL bShow);
+VOID FASTCALL IntNotifyImeShowStatus(_In_ PWND pImeWnd);
+VOID FASTCALL IntCheckImeShowStatusInThread(_In_ PWND pImeWnd);
+
+static inline
+VOID
+ReplaceWndPtr(_Inout_ PWND* ppwnd, _In_opt_ PWND pwndNew)
+{
+    /* First reference the new one */
+    if (pwndNew != NULL)
+    {
+        UserReferenceObject(pwndNew);
+    }
+
+    /* Then dereference the previous one */
+    if (*ppwnd != NULL)
+    {
+        UserDereferenceObject(*ppwnd);
+    }
+
+    /* And set */
+    *ppwnd = pwndNew;
+}
 
 static inline
 VOID
 WndSetOwner(_Inout_ PWND pwnd, _In_opt_ PWND pwndOwner)
 {
-    /* First reference the new owner window */
-    if (pwndOwner != NULL)
-    {
-        UserReferenceObject(pwndOwner);
-    }
+    ReplaceWndPtr(&pwnd->spwndOwner, pwndOwner);
+}
 
-    /* Now dereference the previous owner window */
-    if (pwnd->spwndOwner != NULL)
-    {
-        UserDereferenceObject(pwnd->spwndOwner);
-    }
+static inline
+VOID
+WndSetParent(_Inout_ PWND pwnd, _In_opt_ PWND pwndParent)
+{
+    ReplaceWndPtr(&pwnd->spwndParent, pwndParent);
+}
 
-    pwnd->spwndOwner = pwndOwner;
+static inline
+VOID
+WndSetChild(_Inout_ PWND pwnd, _In_opt_ PWND pwndChild)
+{
+    ReplaceWndPtr(&pwnd->spwndChild, pwndChild);
+}
+
+static inline
+VOID
+WndSetNext(_Inout_ PWND pwnd, _In_opt_ PWND pwndNext)
+{
+    ReplaceWndPtr(&pwnd->spwndNext, pwndNext);
+}
+
+static inline
+VOID
+WndSetPrev(_Inout_ PWND pwnd, _In_opt_ PWND pwndPrev)
+{
+    ReplaceWndPtr(&pwnd->spwndPrev, pwndPrev);
+}
+
+static inline
+VOID
+WndSetLastActive(_Inout_ PWND pwnd, _In_opt_ PWND pwndLastActive)
+{
+    ReplaceWndPtr(&pwnd->spwndLastActive, pwndLastActive);
 }
 
 /* EOF */

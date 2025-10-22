@@ -40,6 +40,7 @@ typedef struct
     HBITMAP hImageStrip;
     HBRUSH hBrush;
     HFONT hfFont;
+    BOOL bCloseDlg;
     WNDPROC OldButtonProc;
 } LOGOFF_DLG_CONTEXT, *PLOGOFF_DLG_CONTEXT;
 
@@ -151,9 +152,8 @@ DoLoadIcons(HWND hwndDlg, PPICK_ICON_CONTEXT pIconContext, LPCWSTR pszFile)
         }
     }
 
-    // Set the text and reset the edit control's modification flag
     SetDlgItemTextW(hwndDlg, IDC_EDIT_PATH, pIconContext->szPath);
-    SendDlgItemMessage(hwndDlg, IDC_EDIT_PATH, EM_SETMODIFY, FALSE, 0);
+    SendMessageW(pIconContext->hDlgCtrl, LB_SETCURSEL, 0, 0);
 
     if (pIconContext->nIcons == 0)
     {
@@ -194,9 +194,7 @@ INT_PTR CALLBACK PickIconProc(
     HICON hIcon;
     INT index, count;
     WCHAR szText[MAX_PATH], szFilter[100];
-    CStringW strTitle;
     OPENFILENAMEW ofn;
-
     PPICK_ICON_CONTEXT pIconContext = (PPICK_ICON_CONTEXT)GetWindowLongPtr(hwndDlg, DWLP_USER);
 
     switch(uMsg)
@@ -251,18 +249,11 @@ INT_PTR CALLBACK PickIconProc(
             case IDOK:
             {
                 /* Check whether the path edit control has been modified; if so load the icons instead of validating */
-                if (SendDlgItemMessage(hwndDlg, IDC_EDIT_PATH, EM_GETMODIFY, 0, 0))
+                GetDlgItemTextW(hwndDlg, IDC_EDIT_PATH, szText, _countof(szText));
+                if (lstrcmpiW(szText, pIconContext->szPath))
                 {
-                    /* Reset the edit control's modification flag and retrieve the text */
-                    SendDlgItemMessage(hwndDlg, IDC_EDIT_PATH, EM_SETMODIFY, FALSE, 0);
-                    GetDlgItemTextW(hwndDlg, IDC_EDIT_PATH, szText, _countof(szText));
-
-                    // Load the icons
                     if (!DoLoadIcons(hwndDlg, pIconContext, szText))
                         NoIconsInFile(hwndDlg, pIconContext);
-
-                    // Set the selection
-                    SendMessageW(pIconContext->hDlgCtrl, LB_SETCURSEL, 0, 0);
                     break;
                 }
 
@@ -293,6 +284,7 @@ INT_PTR CALLBACK PickIconProc(
             case IDC_BUTTON_PATH:
             {
                 // Choose the module path
+                CStringW strTitle;
                 szText[0] = 0;
                 szFilter[0] = 0;
                 ZeroMemory(&ofn, sizeof(ofn));
@@ -310,9 +302,6 @@ INT_PTR CALLBACK PickIconProc(
                 // Load the icons
                 if (!DoLoadIcons(hwndDlg, pIconContext, szText))
                     NoIconsInFile(hwndDlg, pIconContext);
-
-                // Set the selection
-                SendMessageW(pIconContext->hDlgCtrl, LB_SETCURSEL, 0, 0);
                 break;
             }
 
@@ -331,8 +320,9 @@ INT_PTR CALLBACK PickIconProc(
             lpdis = (LPDRAWITEMSTRUCT)lParam;
             if (lpdis->itemID == (UINT)-1)
                 break;
-            switch (lpdis->itemAction)
+            switch (lpdis->itemAction) // FIXME: MSDN says that more than one of these can be set
             {
+                // FIXME: ODA_FOCUS
                 case ODA_SELECT:
                 case ODA_DRAWENTIRE:
                 {
@@ -365,11 +355,12 @@ BOOL WINAPI PickIconDlg(
     UINT nMaxFile,
     INT* lpdwIconIndex)
 {
+    CCoInit ComInit; // For SHAutoComplete (CORE-20030)
     int res;
     WCHAR szExpandedPath[MAX_PATH];
 
     // Initialize the dialog
-    PICK_ICON_CONTEXT IconContext = { NULL };
+    PICK_ICON_CONTEXT IconContext = {0};
     IconContext.Index = *lpdwIconIndex;
     StringCchCopyW(IconContext.szPath, _countof(IconContext.szPath), lpstrFile);
     ExpandEnvironmentStringsW(lpstrFile, szExpandedPath, _countof(szExpandedPath));
@@ -583,7 +574,7 @@ static INT_PTR CALLBACK RunDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
                     INT ic;
                     WCHAR *psz, *pszExpanded, *parent = NULL;
                     DWORD cchExpand;
-                    SHELLEXECUTEINFOW sei;
+                    SHELLEXECUTEINFOW sei = { sizeof(sei) };
                     NMRUNFILEDLGW nmrfd;
 
                     ic = GetWindowTextLengthW(htxt);
@@ -592,9 +583,6 @@ static INT_PTR CALLBACK RunDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
                         EndDialog(hwnd, IDCANCEL);
                         return TRUE;
                     }
-
-                    ZeroMemory(&sei, sizeof(sei));
-                    sei.cbSize = sizeof(sei);
 
                     /*
                      * Allocate a new MRU entry, we need to add two characters
@@ -694,7 +682,7 @@ static INT_PTR CALLBACK RunDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
                                 EndDialog(hwnd, IDOK);
                                 break;
                             }
-                            else if (SUCCEEDED(ShellExecuteExW(&sei)))
+                            else if (ShellExecuteExW(&sei))
                             {
                                 /* Call GetWindowText again in case the contents of the edit box have changed. */
                                 GetWindowTextW(htxt, psz, ic + 1);
@@ -768,9 +756,11 @@ static INT_PTR CALLBACK RunDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
                 case IDC_RUNDLG_EDITPATH:
                 {
                     if (HIWORD(wParam) == CBN_EDITCHANGE)
-                    {
                         EnableOkButtonFromEditContents(hwnd);
-                    }
+
+                    // Delay handling dropdown changes until the edit box has been updated.
+                    if (HIWORD(wParam) == CBN_SELCHANGE)
+                        PostMessage(hwnd, message, MAKELONG(IDC_RUNDLG_EDITPATH, CBN_EDITCHANGE), lParam);
                     return TRUE;
                 }
             }
@@ -925,7 +915,7 @@ Continue:
 
         if (pszLatest)
         {
-            if (wcsicmp(pszCmd, pszLatest) == 0)
+            if (_wcsicmp(pszCmd, pszLatest) == 0)
             {
                 SendMessageW(hCb, CB_INSERTSTRING, 0, (LPARAM)pszCmd);
                 SetWindowTextW(hCb, pszCmd);
@@ -1124,6 +1114,10 @@ int WINAPI RestartDialogEx(HWND hWndOwner, LPCWSTR lpwstrReason, DWORD uFlags, D
 #define BUTTON_LOG_OFF_FOCUSED          (CY_BITMAP + BUTTON_LOG_OFF_PRESSED)
 #define BUTTON_SWITCH_USER_DISABLED     (CY_BITMAP + BUTTON_LOG_OFF_FOCUSED) // Temporary
 
+/* For bIsButtonHot */
+#define LOG_OFF_BUTTON_HOT              0
+#define SWITCH_USER_BUTTON_HOT          1
+
 BOOL DrawIconOnOwnerDrawnButtons(DRAWITEMSTRUCT* pdis, PLOGOFF_DLG_CONTEXT pContext)
 {
     BOOL bRet = FALSE;
@@ -1136,7 +1130,7 @@ BOOL DrawIconOnOwnerDrawnButtons(DRAWITEMSTRUCT* pdis, PLOGOFF_DLG_CONTEXT pCont
     hbmOld = (HBITMAP)SelectObject(hdcMem, pContext->hImageStrip);
     rect = pdis->rcItem;
 
-    /* Check the button ID for revelant bitmap to be used */
+    /* Check the button ID for relevant bitmap to be used */
     switch (pdis->CtlID)
     {
         case IDC_LOG_OFF_BUTTON:
@@ -1152,7 +1146,7 @@ BOOL DrawIconOnOwnerDrawnButtons(DRAWITEMSTRUCT* pdis, PLOGOFF_DLG_CONTEXT pCont
                     {
                         y = BUTTON_LOG_OFF_PRESSED;
                     }
-                    else if (pContext->bIsButtonHot[0] || (pdis->itemState & ODS_FOCUS))
+                    else if (pContext->bIsButtonHot[LOG_OFF_BUTTON_HOT] || (pdis->itemState & ODS_FOCUS))
                     {
                         y = BUTTON_LOG_OFF_FOCUSED;
                     }
@@ -1175,7 +1169,7 @@ BOOL DrawIconOnOwnerDrawnButtons(DRAWITEMSTRUCT* pdis, PLOGOFF_DLG_CONTEXT pCont
                     {
                         y = BUTTON_SWITCH_USER_PRESSED;
                     }
-                    else if (pContext->bIsButtonHot[1] || (pdis->itemState & ODS_FOCUS))
+                    else if (pContext->bIsButtonHot[SWITCH_USER_BUTTON_HOT] || (pdis->itemState & ODS_FOCUS))
                     {
                         y = BUTTON_SWITCH_USER_FOCUSED;
                     }
@@ -1210,7 +1204,7 @@ BOOL DrawIconOnOwnerDrawnButtons(DRAWITEMSTRUCT* pdis, PLOGOFF_DLG_CONTEXT pCont
 INT_PTR CALLBACK OwnerDrawButtonSubclass(HWND hButton, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     PLOGOFF_DLG_CONTEXT pContext;
-    pContext = (PLOGOFF_DLG_CONTEXT)GetWindowLongPtrW(hButton, GWLP_USERDATA);
+    pContext = (PLOGOFF_DLG_CONTEXT)GetWindowLongPtrW(GetParent(hButton), GWLP_USERDATA);
 
     int buttonID = GetDlgCtrlID(hButton);
 
@@ -1224,15 +1218,21 @@ INT_PTR CALLBACK OwnerDrawButtonSubclass(HWND hButton, UINT uMsg, WPARAM wParam,
             if (GetCapture() != hButton)
             {
                 SetCapture(hButton);
-                if (buttonID == IDC_LOG_OFF_BUTTON)
+
+                switch (buttonID)
                 {
-                    pContext->bIsButtonHot[0] = TRUE;
+                    case IDC_LOG_OFF_BUTTON:
+                    {
+                        pContext->bIsButtonHot[LOG_OFF_BUTTON_HOT] = TRUE;
+                        break;
+                    }
+                    case IDC_SWITCH_USER_BUTTON:
+                    {
+                        pContext->bIsButtonHot[SWITCH_USER_BUTTON_HOT] = TRUE;
+                        break;
+                    }
                 }
-                else if (buttonID == IDC_SWITCH_USER_BUTTON)
-                {
-                    pContext->bIsButtonHot[1] = TRUE;
-                }
-                SetCursor(LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_HAND)));
+                SetCursor(LoadCursorW(NULL, IDC_HAND));
             }
 
             ClientToScreen(hButton, &pt);
@@ -1241,13 +1241,19 @@ INT_PTR CALLBACK OwnerDrawButtonSubclass(HWND hButton, UINT uMsg, WPARAM wParam,
             if (hwndTarget != hButton)
             {
                 ReleaseCapture();
-                if (buttonID == IDC_LOG_OFF_BUTTON)
+
+                switch (buttonID)
                 {
-                    pContext->bIsButtonHot[0] = FALSE;
-                }
-                else if (buttonID == IDC_SWITCH_USER_BUTTON)
-                {
-                    pContext->bIsButtonHot[1] = FALSE;
+                    case IDC_LOG_OFF_BUTTON:
+                    {
+                        pContext->bIsButtonHot[LOG_OFF_BUTTON_HOT] = FALSE;
+                        break;
+                    }
+                    case IDC_SWITCH_USER_BUTTON:
+                    {
+                        pContext->bIsButtonHot[SWITCH_USER_BUTTON_HOT] = FALSE;
+                        break;
+                    }
                 }
             }
             InvalidateRect(hButton, NULL, FALSE);
@@ -1298,6 +1304,21 @@ VOID CreateToolTipForButtons(int controlID, int detailID, HWND hDlg, int titleID
     LoadStringW(shell32_hInstance, titleID, szBuffer, _countof(szBuffer));
     SendMessageW(hwndTip, TTM_SETTITLEW, TTI_NONE, (LPARAM)szBuffer);
     SendMessageW(hwndTip, TTM_SETMAXTIPWIDTH, 0, 250);
+}
+
+VOID EndFriendlyDialog(HWND hwnd, PLOGOFF_DLG_CONTEXT pContext)
+{
+    DeleteObject(pContext->hBrush);
+    DeleteObject(pContext->hImageStrip);
+    DeleteObject(pContext->hfFont);
+
+    /* Remove the subclass from the buttons */
+    for (int i = 0; i < NUMBER_OF_BUTTONS; i++)
+    {
+        SetWindowLongPtrW(GetDlgItem(hwnd, IDC_LOG_OFF_BUTTON + i),
+                          GWLP_WNDPROC,
+                          (LONG_PTR)pContext->OldButtonProc);
+    }
 }
 
 static BOOL IsFriendlyUIActive(VOID)
@@ -1389,18 +1410,20 @@ static VOID FancyLogoffOnInit(HWND hwnd, PLOGOFF_DLG_CONTEXT pContext)
 
     pContext->hImageStrip = LoadBitmapW(shell32_hInstance, MAKEINTRESOURCEW(IDB_IMAGE_STRIP));
 
-    CreateToolTipForButtons(IDC_LOG_OFF_BUTTON, IDS_LOG_OFF_DESC, hwnd, IDS_LOG_OFF_TITLE);
-    CreateToolTipForButtons(IDC_SWITCH_USER_BUTTON, IDS_SWITCH_USER_DESC, hwnd, IDS_SWITCH_USER_TITLE);
-
     /* Gather old button func */
     pContext->OldButtonProc = (WNDPROC)GetWindowLongPtrW(GetDlgItem(hwnd, IDC_LOG_OFF_BUTTON), GWLP_WNDPROC);
 
-    /* Make buttons to remember pContext and subclass the buttons as well as set bIsButtonHot boolean flags to false */
+    /* Set bIsButtonHot to false, create tooltips for each buttons and subclass the buttons */
     for (int i = 0; i < NUMBER_OF_BUTTONS; i++)
     {
         pContext->bIsButtonHot[i] = FALSE;
-        SetWindowLongPtrW(GetDlgItem(hwnd, IDC_LOG_OFF_BUTTON + i), GWLP_USERDATA, (LONG_PTR)pContext);
-        SetWindowLongPtrW(GetDlgItem(hwnd, IDC_LOG_OFF_BUTTON + i), GWLP_WNDPROC, (LONG_PTR)OwnerDrawButtonSubclass);
+        SetWindowLongPtrW(GetDlgItem(hwnd, IDC_LOG_OFF_BUTTON + i),
+                          GWLP_WNDPROC,
+                          (LONG_PTR)OwnerDrawButtonSubclass);
+        CreateToolTipForButtons(IDC_LOG_OFF_BUTTON + i,
+                                IDS_LOG_OFF_DESC + i,
+                                hwnd,
+                                IDS_LOG_OFF_TITLE + i);
     }
 }
 
@@ -1427,25 +1450,33 @@ INT_PTR CALLBACK LogOffDialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
             return TRUE;
         }
 
-        case WM_CLOSE:
-            DestroyWindow(hwnd);
-            PostQuitMessage(IDCANCEL);
-            break;
+        case WM_DESTROY:
+            if (pContext->bFriendlyUI)
+                EndFriendlyDialog(hwnd, pContext);
+            return TRUE;
 
-        /*
-        * If the user deactivates the log off dialog (it loses its focus
-        * while the dialog is not being closed), then destroy the dialog
-        * box.
-        */
         case WM_ACTIVATE:
         {
+            /*
+             * If the user deactivates the log-off dialog (it loses its focus
+             * while the dialog is not being closed), then destroy the dialog
+             * and cancel user logoff.
+             */
             if (LOWORD(wParam) == WA_INACTIVE)
             {
-                DestroyWindow(hwnd);
-                PostQuitMessage(0);
+                if (!pContext->bCloseDlg)
+                {
+                    pContext->bCloseDlg = TRUE;
+                    EndDialog(hwnd, IDCANCEL);
+                }
             }
             return FALSE;
         }
+
+        case WM_CLOSE:
+            pContext->bCloseDlg = TRUE;
+            EndDialog(hwnd, IDCANCEL);
+            break;
 
         case WM_COMMAND:
             switch (LOWORD(wParam))
@@ -1456,23 +1487,11 @@ INT_PTR CALLBACK LogOffDialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
                     break;
 
                 case IDCANCEL:
-                    DestroyWindow(hwnd);
-                    PostQuitMessage(IDCANCEL);
+                    pContext->bCloseDlg = TRUE;
+                    EndDialog(hwnd, IDCANCEL);
                     break;
             }
             break;
-
-        case WM_DESTROY:
-            DeleteObject(pContext->hBrush);
-            DeleteObject(pContext->hImageStrip);
-            DeleteObject(pContext->hfFont);
-
-            /* Remove the subclass from the buttons */
-            for (int i = 0; i < NUMBER_OF_BUTTONS; i++)
-            {
-                SetWindowLongPtrW(GetDlgItem(hwnd, IDC_LOG_OFF_BUTTON + i), GWLP_WNDPROC, (LONG_PTR)pContext->OldButtonProc);
-            }
-            return TRUE;
 
         case WM_CTLCOLORSTATIC:
         {
@@ -1522,13 +1541,9 @@ INT_PTR CALLBACK LogOffDialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 EXTERN_C int WINAPI LogoffWindowsDialog(HWND hWndOwner)
 {
     CComPtr<IUnknown> fadeHandler;
-    BOOL bIsAltKeyPressed = FALSE;
-    MSG Msg;
     HWND parent = NULL;
-    HWND hWndChild = NULL;
-    WCHAR szBuffer[30];
     DWORD LogoffDialogID = IDD_LOG_OFF;
-    LOGOFF_DLG_CONTEXT Context;
+    LOGOFF_DLG_CONTEXT Context = {0};
 
     if (!CallShellDimScreen(&fadeHandler, &parent))
         parent = hWndOwner;
@@ -1539,36 +1554,11 @@ EXTERN_C int WINAPI LogoffWindowsDialog(HWND hWndOwner)
         LogoffDialogID = IDD_LOG_OFF_FANCY;
     }
 
-    hWndChild = CreateDialogParamW(shell32_hInstance, MAKEINTRESOURCEW(LogoffDialogID), parent, LogOffDialogProc, (LPARAM)&Context);
-    ShowWindow(hWndChild, SW_SHOWNORMAL);
-
-     /* Detect either Alt key has been pressed */
-    while (GetMessageW(&Msg, NULL, 0, 0))
-    {
-        if(!IsDialogMessageW(hWndChild, &Msg))
-        {
-            TranslateMessage(&Msg);
-            DispatchMessageW(&Msg);
-        }
-
-        switch (Msg.message)
-        {
-            case WM_SYSKEYDOWN:
-            {
-                /* If the Alt key has been pressed once, add prefix to static controls */
-                if (Msg.wParam == VK_MENU && !bIsAltKeyPressed && Context.bFriendlyUI)
-                {
-                    for (int i = 0; i < NUMBER_OF_BUTTONS; i++)
-                    {
-                        GetDlgItemTextW(hWndChild, IDC_LOG_OFF_BUTTON + i, szBuffer, _countof(szBuffer));
-                        SetDlgItemTextW(hWndChild, IDC_LOG_OFF_STATIC + i, szBuffer);
-                    }
-                    bIsAltKeyPressed = TRUE;
-                }
-            }
-            break;
-        }
-    }
+    DialogBoxParamW(shell32_hInstance,
+                    MAKEINTRESOURCEW(LogoffDialogID),
+                    parent,
+                    LogOffDialogProc,
+                    (LPARAM)&Context);
     return 0;
 }
 
@@ -1613,7 +1603,7 @@ VOID ExitWindowsDialog_backup(HWND hWndOwner)
  */
 void WINAPI ExitWindowsDialog(HWND hWndOwner)
 {
-    typedef DWORD (WINAPI *ShellShFunc)(HWND hParent, WCHAR *Username, BOOL bHideLogoff);
+    typedef DWORD (WINAPI *ShellShFunc)(HWND hWndParent, LPCWSTR pUserName, DWORD dwExcludeOptions);
     HINSTANCE msginaDll = LoadLibraryW(L"msgina.dll");
 
     TRACE("(%p)\n", hWndOwner);
@@ -1633,11 +1623,10 @@ void WINAPI ExitWindowsDialog(HWND hWndOwner)
     }
 
     ShellShFunc pShellShutdownDialog = (ShellShFunc)GetProcAddress(msginaDll, "ShellShutdownDialog");
-
     if (pShellShutdownDialog)
     {
         /* Actually call the function */
-        DWORD returnValue = pShellShutdownDialog(parent, NULL, FALSE);
+        DWORD returnValue = pShellShutdownDialog(parent, NULL, 0);
 
         switch (returnValue)
         {

@@ -63,8 +63,8 @@ FASTCALL
 KiInsertTimerTable(IN PKTIMER Timer,
                    IN ULONG Hand)
 {
-    LARGE_INTEGER InterruptTime;
-    LONGLONG DueTime = Timer->DueTime.QuadPart;
+    ULONGLONG InterruptTime;
+    ULONGLONG DueTime = Timer->DueTime.QuadPart;
     BOOLEAN Expired = FALSE;
     PLIST_ENTRY ListHead, NextEntry;
     PKTIMER CurrentTimer;
@@ -101,8 +101,8 @@ KiInsertTimerTable(IN PKTIMER Timer,
         KiTimerTableListHead[Hand].Time.QuadPart = DueTime;
 
         /* Make sure it hasn't expired already */
-        InterruptTime.QuadPart = KeQueryInterruptTime();
-        if (DueTime <= InterruptTime.QuadPart) Expired = TRUE;
+        InterruptTime = KeQueryInterruptTime();
+        if (DueTime <= InterruptTime) Expired = TRUE;
     }
 
     /* Return expired state */
@@ -249,6 +249,7 @@ KeInitializeTimerEx(OUT PKTIMER Timer,
            "NotificationTimer" : "SynchronizationTimer");
 
     /* Initialize the Dispatch Header */
+    ASSERT((Type == NotificationTimer) || (Type == SynchronizationTimer));
     Timer->Header.Type = TimerNotificationObject + Type;
     //Timer->Header.TimerControlFlags = 0; // win does not init this field
     Timer->Header.Hand = sizeof(KTIMER) / sizeof(ULONG);

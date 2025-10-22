@@ -2,20 +2,7 @@
  * Windows regedit.exe registry editor implementation.
  *
  * Copyright 2002 Andriy Palamarchuk
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ * LICENSE: LGPL-2.1-or-later (https://spdx.org/licenses/LGPL-2.1-or-later)
  */
 
 #ifndef __REACTOS__
@@ -37,9 +24,7 @@ static void output_writeconsole(const WCHAR *str, DWORD wlen)
 #ifdef __REACTOS__
     /* This is win32gui application, don't ever try writing to console.
      * For the console version we have a separate reg.exe application. */
-    WCHAR AppStr[255];
-    LoadStringW(hInst, IDS_APP_TITLE, AppStr, ARRAY_SIZE(AppStr));
-    MessageBoxW(NULL, str, AppStr, MB_OK | MB_ICONINFORMATION);
+    MessageBoxW(NULL, str, NULL, MB_ICONERROR);
 #else
     DWORD count;
 
@@ -219,7 +204,11 @@ static void PerformRegAction(REGEDIT_ACTION action, WCHAR **argv, int *i)
             break;
         }
     default:
+#ifdef __REACTOS__
+        output_message(STRING_UNHANDLED_ACTION);
+#else
         error_exit(STRING_UNHANDLED_ACTION);
+#endif
         break;
     }
 }

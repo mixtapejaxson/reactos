@@ -20,6 +20,9 @@
 #define NDEBUG
 #include <debug.h>
 
+#undef KdSendPacket
+#undef KdReceivePacket
+
 /* GLOBALS *******************************************************************/
 
 #define KdpBufferSize  (1024 * 512)
@@ -53,12 +56,6 @@ PKDP_INIT_ROUTINE InitRoutines[KdMax] =
     KdpKdbgInit
 #endif
 };
-
-static ULONG KdbgNextApiNumber = DbgKdContinueApi;
-static CONTEXT KdbgContext;
-static EXCEPTION_RECORD64 KdbgExceptionRecord;
-static BOOLEAN KdbgFirstChanceException;
-static NTSTATUS KdbgContinueStatus = STATUS_SUCCESS;
 
 /* LOCKING FUNCTIONS *********************************************************/
 
@@ -596,8 +593,9 @@ KdIoPrintf(
     KdIoPrintString(Buffer, Length);
 }
 
-
-extern STRING KdbPromptString;
+#ifdef KDBG
+extern const CSTRING KdbPromptStr;
+#endif
 
 VOID
 NTAPI
@@ -607,93 +605,101 @@ KdSendPacket(
     _In_opt_ PSTRING MessageData,
     _Inout_ PKD_CONTEXT Context)
 {
-    if (PacketType == PACKET_TYPE_KD_DEBUG_IO)
-    {
-        ULONG ApiNumber = ((PDBGKD_DEBUG_IO)MessageHeader->Buffer)->ApiNumber;
+    PDBGKD_DEBUG_IO DebugIo;
 
-        /* Validate API call */
-        if (MessageHeader->Length != sizeof(DBGKD_DEBUG_IO))
-            return;
-        if ((ApiNumber != DbgKdPrintStringApi) &&
-            (ApiNumber != DbgKdGetStringApi))
-        {
-            return;
-        }
-        if (!MessageData)
-            return;
-
-        /* NOTE: MessageData->Length should be equal to
-         * DebugIo.u.PrintString.LengthOfString, or to
-         * DebugIo.u.GetString.LengthOfPromptString */
-
-        if (!KdpDebugMode.Value)
-            return;
-
-        /* Print the string proper */
-        KdIoPrintString(MessageData->Buffer, MessageData->Length);
-        return;
-    }
-    else if (PacketType == PACKET_TYPE_KD_STATE_CHANGE64)
+    if (PacketType == PACKET_TYPE_KD_STATE_CHANGE32 ||
+        PacketType == PACKET_TYPE_KD_STATE_CHANGE64)
     {
         PDBGKD_ANY_WAIT_STATE_CHANGE WaitStateChange = (PDBGKD_ANY_WAIT_STATE_CHANGE)MessageHeader->Buffer;
+
         if (WaitStateChange->NewState == DbgKdLoadSymbolsStateChange)
+            return; // Ignore: invoked anytime a new module is loaded.
+
+        /* We should not get there, unless an exception has been raised */
+        if (WaitStateChange->NewState == DbgKdExceptionStateChange)
         {
-#ifdef KDBG
-            PLDR_DATA_TABLE_ENTRY LdrEntry;
-            /* Load symbols. Currently implemented only for KDBG! */
-            if (KdbpSymFindModule((PVOID)(ULONG_PTR)WaitStateChange->u.LoadSymbols.BaseOfDll, -1, &LdrEntry))
+            PEXCEPTION_RECORD64 ExceptionRecord = &WaitStateChange->u.Exception.ExceptionRecord;
+
+            /*
+             * Claim the debugger to be present, so that KdpSendWaitContinue()
+             * can call back KdReceivePacket(PACKET_TYPE_KD_STATE_MANIPULATE),
+             * which, in turn, informs KD that the exception cannot be handled.
+             */
+            KD_DEBUGGER_NOT_PRESENT = FALSE;
+            SharedUserData->KdDebuggerEnabled |= 0x00000002;
+
+            KdIoPrintf("%s: Got exception 0x%08lx @ 0x%p, Flags 0x%08x, %s - Info[0]: 0x%p\n",
+                       __FUNCTION__,
+                       ExceptionRecord->ExceptionCode,
+                       (PVOID)(ULONG_PTR)ExceptionRecord->ExceptionAddress,
+                       ExceptionRecord->ExceptionFlags,
+                       WaitStateChange->u.Exception.FirstChance ? "FirstChance" : "LastChance",
+                       ExceptionRecord->ExceptionInformation[0]);
+#if defined(_M_IX86) || defined(_M_AMD64) || defined(_M_ARM) || defined(_M_ARM64)
+extern VOID NTAPI RtlpBreakWithStatusInstruction(VOID);
+            if ((ExceptionRecord->ExceptionCode == STATUS_BREAKPOINT) &&
+                ((PVOID)(ULONG_PTR)ExceptionRecord->ExceptionAddress == (PVOID)RtlpBreakWithStatusInstruction))
             {
-                KdbSymProcessSymbols(LdrEntry, !WaitStateChange->u.LoadSymbols.UnloadSymbols);
+                PCONTEXT ContextRecord = &KeGetCurrentPrcb()->ProcessorState.ContextFrame;
+                ULONG Status =
+#if defined(_M_IX86)
+                    ContextRecord->Eax;
+#elif defined(_M_AMD64)
+                    (ULONG)ContextRecord->Rcx;
+#elif defined(_M_ARM)
+                    ContextRecord->R0;
+#else // defined(_M_ARM64)
+                    (ULONG)ContextRecord->X0;
+#endif
+                KdIoPrintf("STATUS_BREAKPOINT Status 0x%08lx\n", Status);
             }
+// #else
+// #error Unknown architecture
 #endif
             return;
         }
-        else if (WaitStateChange->NewState == DbgKdExceptionStateChange)
-        {
-            KdbgNextApiNumber = DbgKdGetContextApi;
-            KdbgExceptionRecord = WaitStateChange->u.Exception.ExceptionRecord;
-            KdbgFirstChanceException = WaitStateChange->u.Exception.FirstChance;
-            return;
-        }
+
+        KdIoPrintf("%s: PACKET_TYPE_KD_STATE_CHANGE32/64 NewState %d is UNIMPLEMENTED\n",
+                   __FUNCTION__, WaitStateChange->NewState);
+        return;
     }
-    else if (PacketType == PACKET_TYPE_KD_STATE_MANIPULATE)
+    else
+    if (PacketType == PACKET_TYPE_KD_STATE_MANIPULATE)
     {
         PDBGKD_MANIPULATE_STATE64 ManipulateState = (PDBGKD_MANIPULATE_STATE64)MessageHeader->Buffer;
-        if (ManipulateState->ApiNumber == DbgKdGetContextApi)
-        {
-            KD_CONTINUE_TYPE Result;
-
-#ifdef KDBG
-            /* Check if this is an assertion failure */
-            if (KdbgExceptionRecord.ExceptionCode == STATUS_ASSERTION_FAILURE)
-            {
-                /* Bump EIP to the instruction following the int 2C */
-                KeSetContextPc(&KdbgContext, KeGetContextPc(&KdbgContext) + 2);
-            }
-
-            Result = KdbEnterDebuggerException(&KdbgExceptionRecord,
-                                               KdbgContext.SegCs & 1,
-                                               &KdbgContext,
-                                               KdbgFirstChanceException);
-#else
-            /* We'll manually dump the stack for the user... */
-            KeRosDumpStackFrames(NULL, 0);
-            Result = kdHandleException;
-#endif
-            if (Result != kdHandleException)
-                KdbgContinueStatus = STATUS_SUCCESS;
-            else
-                KdbgContinueStatus = STATUS_UNSUCCESSFUL;
-            KdbgNextApiNumber = DbgKdSetContextApi;
-            return;
-        }
-        else if (ManipulateState->ApiNumber == DbgKdSetContextApi)
-        {
-            KdbgNextApiNumber = DbgKdContinueApi;
-            return;
-        }
+        KdIoPrintf("%s: PACKET_TYPE_KD_STATE_MANIPULATE for ApiNumber %lu\n",
+                   __FUNCTION__, ManipulateState->ApiNumber);
+        return;
     }
-    UNIMPLEMENTED;
+
+    if (PacketType != PACKET_TYPE_KD_DEBUG_IO)
+    {
+        KdIoPrintf("%s: PacketType %d is UNIMPLEMENTED\n", __FUNCTION__, PacketType);
+        return;
+    }
+
+    DebugIo = (PDBGKD_DEBUG_IO)MessageHeader->Buffer;
+
+    /* Validate API call */
+    if (MessageHeader->Length != sizeof(DBGKD_DEBUG_IO))
+        return;
+    if ((DebugIo->ApiNumber != DbgKdPrintStringApi) &&
+        (DebugIo->ApiNumber != DbgKdGetStringApi))
+    {
+        return;
+    }
+    if (!MessageData)
+        return;
+
+    /* NOTE: MessageData->Length should be equal to
+     * DebugIo.u.PrintString.LengthOfString, or to
+     * DebugIo.u.GetString.LengthOfPromptString */
+
+    if (!KdpDebugMode.Value)
+        return;
+
+    /* Print the string proper */
+    KdIoPrintString(MessageData->Buffer, MessageData->Length);
 }
 
 KDSTATUS
@@ -706,46 +712,34 @@ KdReceivePacket(
     _Inout_ PKD_CONTEXT Context)
 {
 #ifdef KDBG
-    STRING NewLine = RTL_CONSTANT_STRING("\n");
-    STRING ResponseString;
     PDBGKD_DEBUG_IO DebugIo;
+    STRING ResponseString;
     CHAR MessageBuffer[512];
 #endif
+
+    if (PacketType == PACKET_TYPE_KD_POLL_BREAKIN)
+    {
+        /* We don't support breaks-in */
+        return KdPacketTimedOut;
+    }
 
     if (PacketType == PACKET_TYPE_KD_STATE_MANIPULATE)
     {
         PDBGKD_MANIPULATE_STATE64 ManipulateState = (PDBGKD_MANIPULATE_STATE64)MessageHeader->Buffer;
         RtlZeroMemory(MessageHeader->Buffer, MessageHeader->MaximumLength);
-        if (KdbgNextApiNumber == DbgKdGetContextApi)
-        {
-            ManipulateState->ApiNumber = DbgKdGetContextApi;
-            MessageData->Length = 0;
-            MessageData->Buffer = (PCHAR)&KdbgContext;
-            return KdPacketReceived;
-        }
-        else if (KdbgNextApiNumber == DbgKdSetContextApi)
-        {
-            ManipulateState->ApiNumber = DbgKdSetContextApi;
-            MessageData->Length = sizeof(KdbgContext);
-            MessageData->Buffer = (PCHAR)&KdbgContext;
-            return KdPacketReceived;
-        }
-        else if (KdbgNextApiNumber != DbgKdContinueApi)
-        {
-            UNIMPLEMENTED;
-        }
+
+        /* The exception (notified via DbgKdExceptionStateChange in
+         * KdSendPacket()) cannot be handled: return a failure code */
         ManipulateState->ApiNumber = DbgKdContinueApi;
-        ManipulateState->u.Continue.ContinueStatus = KdbgContinueStatus;
-
-        /* Prepare for next time */
-        KdbgNextApiNumber = DbgKdContinueApi;
-        KdbgContinueStatus = STATUS_SUCCESS;
-
+        ManipulateState->u.Continue.ContinueStatus = DBG_EXCEPTION_NOT_HANDLED;
         return KdPacketReceived;
     }
 
     if (PacketType != PACKET_TYPE_KD_DEBUG_IO)
+    {
+        KdIoPrintf("%s: PacketType %d is UNIMPLEMENTED\n", __FUNCTION__, PacketType);
         return KdPacketTimedOut;
+    }
 
 #ifdef KDBG
     DebugIo = (PDBGKD_DEBUG_IO)MessageHeader->Buffer;
@@ -768,8 +762,8 @@ KdReceivePacket(
 
     /* The prompt string has been printed by KdSendPacket; go to
      * new line and print the kdb prompt -- for SYSREG2 support. */
-    KdpPrintString(&NewLine);
-    KdpPrintString(&KdbPromptString); // Alternatively, use "Input> "
+    KdIoPrintString("\n", 1);
+    KdIoPuts(KdbPromptStr.Buffer); // Alternatively, use "Input> "
 
     if (!(KdbDebugState & KD_DEBUG_KDSERIAL))
         KbdDisableMouse();

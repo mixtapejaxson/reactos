@@ -151,7 +151,7 @@
 #define IDS_BELGIAN_COMMA_LAYOUT                       5089
 #define IDS_CHINESE_TRADITIONAL_NEWPHONETIC_LAYOUT     5090
 #define IDS_CHINESE_SIMPLIFIED_MSPINYINIME30_LAYOUT    5091
-#define IDS_UNITED_STATES_DVIRAK_LAYOUT                5092
+#define IDS_UNITED_STATES_DVORAK_LAYOUT                5092
 #define IDS_CHINESE_TRADITIONAL_NEWCHANGJIE_LAYOUT     5093
 #define IDS_ASSAMESE_LAYOUT                            5094
 #define IDS_BENGALI_LAYOUT                             5095
@@ -201,4 +201,7 @@
 #define IDS_BURMESE_LAYOUT                             5140
 #define IDS_UKRAINIAN_STUDENT_LAYOUT                   5141
 #define IDS_ESPERANTO_LAYOUT                           5142
+#define IDS_GERMAN_EXTENDED1_LAYOUT                    5143
+#define IDS_GERMAN_EXTENDED2_LAYOUT                    5144
+#define IDS_COLEMAK_LAYOUT                             5145
 #define IDS_ROMANIAN_STANDARD_LAYOUT                   5175

@@ -29,10 +29,10 @@ KSPIN_LOCK KiFreezeExecutionLock;
 KIPCR KiInitialPcr;
 
 /* Boot and double-fault/NMI/DPC stack */
-UCHAR DECLSPEC_ALIGN(16) P0BootStackData[KERNEL_STACK_SIZE] = {0};
-UCHAR DECLSPEC_ALIGN(16) KiDoubleFaultStackData[KERNEL_STACK_SIZE] = {0};
-ULONG_PTR P0BootStack = (ULONG_PTR)&P0BootStackData[KERNEL_STACK_SIZE];
-ULONG_PTR KiDoubleFaultStack = (ULONG_PTR)&KiDoubleFaultStackData[KERNEL_STACK_SIZE];
+UCHAR DECLSPEC_ALIGN(16) KiP0BootStackData[KERNEL_STACK_SIZE] = {0};
+UCHAR DECLSPEC_ALIGN(16) KiP0DoubleFaultStackData[KERNEL_STACK_SIZE] = {0};
+PVOID KiP0BootStack = &KiP0BootStackData[KERNEL_STACK_SIZE];
+PVOID KiP0DoubleFaultStack = &KiP0DoubleFaultStackData[KERNEL_STACK_SIZE];
 
 ULONGLONG BootCycles, BootCyclesEnd;
 
@@ -87,17 +87,17 @@ KiInitMachineDependent(VOID)
 
 }
 
+static
 VOID
-NTAPI
-KiInitializePcr(IN PKIPCR Pcr,
-                IN ULONG ProcessorNumber,
-                IN PKTHREAD IdleThread,
-                IN PVOID DpcStack)
+KiInitializePcr(
+    _Out_ PKIPCR Pcr,
+    _In_ ULONG ProcessorNumber,
+    _In_ PKGDTENTRY64 GdtBase,
+    _In_ PKIDTENTRY64 IdtBase,
+    _In_ PKTSS64 TssBase,
+    _In_ PKTHREAD IdleThread,
+    _In_ PVOID DpcStack)
 {
-    KDESCRIPTOR GdtDescriptor = {{0},0,0}, IdtDescriptor = {{0},0,0};
-    PKGDTENTRY64 TssEntry;
-    USHORT Tr = 0;
-
     /* Zero out the PCR */
     RtlZeroMemory(Pcr, sizeof(KIPCR));
 
@@ -126,21 +126,12 @@ KiInitializePcr(IN PKIPCR Pcr,
     Pcr->Prcb.Number = (UCHAR)ProcessorNumber;
     Pcr->Prcb.SetMember = 1ULL << ProcessorNumber;
 
-    /* Get GDT and IDT descriptors */
-    __sgdt(&GdtDescriptor.Limit);
-    __sidt(&IdtDescriptor.Limit);
-    Pcr->GdtBase = (PVOID)GdtDescriptor.Base;
-    Pcr->IdtBase = (PKIDTENTRY)IdtDescriptor.Base;
+    /* Set GDT and IDT base */
+    Pcr->GdtBase = GdtBase;
+    Pcr->IdtBase = IdtBase;
 
-    /* Get TSS Selector */
-    __str(&Tr);
-    ASSERT(Tr == KGDT64_SYS_TSS);
-
-    /* Get TSS Entry */
-    TssEntry = KiGetGdtEntry(Pcr->GdtBase, Tr);
-
-    /* Get the KTSS itself */
-    Pcr->TssBase = KiGetGdtDescriptorBase(TssEntry);
+    /* Set TssBase */
+    Pcr->TssBase = TssBase;
 
     Pcr->Prcb.RspBase = Pcr->TssBase->Rsp0; // FIXME
 
@@ -162,7 +153,6 @@ KiInitializePcr(IN PKIPCR Pcr,
 
     /* Start us out at PASSIVE_LEVEL */
     Pcr->Irql = PASSIVE_LEVEL;
-    KeSetCurrentIrql(PASSIVE_LEVEL);
 }
 
 VOID
@@ -170,7 +160,7 @@ NTAPI
 KiInitializeCpu(PKIPCR Pcr)
 {
     ULONG64 Pat;
-    ULONG FeatureBits;
+    ULONG64 FeatureBits;
 
     /* Initialize gs */
     KiInitializeSegments();
@@ -199,7 +189,8 @@ KiInitializeCpu(PKIPCR Pcr)
     FeatureBits |= KF_NX_ENABLED;
 
     /* Save feature bits */
-    Pcr->Prcb.FeatureBits = FeatureBits;
+    Pcr->Prcb.FeatureBits = (ULONG)FeatureBits;
+    Pcr->Prcb.FeatureBitsHigh = FeatureBits >> 32;
 
     /* Enable fx save restore support */
     __writecr4(__readcr4() | CR4_FXSR);
@@ -216,6 +207,13 @@ KiInitializeCpu(PKIPCR Pcr)
     /* Disable x87 fpu exceptions */
     __writecr0(__readcr0() & ~CR0_NE);
 
+    /* Check if XSAVE is supported */
+    if (FeatureBits & KF_XSTATE)
+    {
+        /* Enable CR4.OSXSAVE[Bit 18] */
+        __writecr4(__readcr4() | CR4_XSAVE);
+    }
+
     /* LDT is unused */
     __lldt(0);
 
@@ -227,7 +225,7 @@ KiInitializeCpu(PKIPCR Pcr)
                          ((ULONG64)(KGDT64_R3_CMCODE|RPL_MASK) << 48));
 
     /* Set the flags to be cleared when doing a syscall */
-    __writemsr(MSR_SYSCALL_MASK, EFLAGS_IF_MASK | EFLAGS_TF | EFLAGS_DF);
+    __writemsr(MSR_SYSCALL_MASK, EFLAGS_IF_MASK | EFLAGS_TF | EFLAGS_DF | EFLAGS_NESTED_TASK);
 
     /* Enable syscall instruction and no-execute support */
     __writemsr(MSR_EFER, __readmsr(MSR_EFER) | MSR_SCE | MSR_NXE);
@@ -239,17 +237,23 @@ KiInitializeCpu(PKIPCR Pcr)
 
     /* Initialize MXCSR */
     _mm_setcsr(INITIAL_MXCSR);
+
+    KeSetCurrentIrql(PASSIVE_LEVEL);
 }
 
+static
 VOID
-FASTCALL
-KiInitializeTss(IN PKTSS64 Tss,
-                IN UINT64 Stack)
+KiInitializeTss(
+    _In_ PKIPCR Pcr,
+    _Out_ PKTSS64 Tss,
+    _In_ PVOID InitialStack,
+    _In_ PVOID DoubleFaultStack,
+    _In_ PVOID NmiStack)
 {
     PKGDTENTRY64 TssEntry;
 
     /* Get pointer to the GDT entry */
-    TssEntry = KiGetGdtEntry(KeGetPcr()->GdtBase, KGDT64_SYS_TSS);
+    TssEntry = KiGetGdtEntry(Pcr->GdtBase, KGDT64_SYS_TSS);
 
     /* Initialize the GDT entry */
     KiInitGdtEntry(TssEntry, (ULONG64)Tss, sizeof(KTSS64), AMD64_TSS, 0);
@@ -261,19 +265,85 @@ KiInitializeTss(IN PKTSS64 Tss,
     Tss->IoMapBase = 0x68;
 
     /* Setup ring 0 stack pointer */
-    Tss->Rsp0 = Stack;
+    Tss->Rsp0 = (ULONG64)InitialStack;
 
     /* Setup a stack for Double Fault Traps */
-    Tss->Ist[1] = (ULONG64)KiDoubleFaultStack;
+    Tss->Ist[1] = (ULONG64)DoubleFaultStack;
 
     /* Setup a stack for CheckAbort Traps */
-    Tss->Ist[2] = (ULONG64)KiDoubleFaultStack;
+    Tss->Ist[2] = (ULONG64)DoubleFaultStack;
 
     /* Setup a stack for NMI Traps */
-    Tss->Ist[3] = (ULONG64)KiDoubleFaultStack;
+    Tss->Ist[3] = (ULONG64)NmiStack;
+}
 
-    /* Load the task register */
-    __ltr(KGDT64_SYS_TSS);
+CODE_SEG("INIT")
+VOID
+KiInitializeProcessorBootStructures(
+    _In_ ULONG ProcessorNumber,
+    _Out_ PKIPCR Pcr,
+    _In_ PKGDTENTRY64 GdtBase,
+    _In_ PKIDTENTRY64 IdtBase,
+    _In_ PKTSS64 TssBase,
+    _In_ PKTHREAD IdleThread,
+    _In_ PVOID KernelStack,
+    _In_ PVOID DpcStack,
+    _In_ PVOID DoubleFaultStack,
+    _In_ PVOID NmiStack)
+{
+    /* Initialize the PCR */
+    KiInitializePcr(Pcr,
+                    ProcessorNumber,
+                    GdtBase,
+                    IdtBase,
+                    TssBase,
+                    IdleThread,
+                    DpcStack);
+
+
+    /* Setup the TSS descriptor and entries */
+    KiInitializeTss(Pcr,
+                    TssBase,
+                    KernelStack,
+                    DoubleFaultStack,
+                    NmiStack);
+}
+
+CODE_SEG("INIT")
+static
+VOID
+KiInitializeP0BootStructures(
+    _Inout_ PLOADER_PARAMETER_BLOCK LoaderBlock)
+{
+    KDESCRIPTOR GdtDescriptor = {{0},0,0}, IdtDescriptor = {{0},0,0};
+    PKGDTENTRY64 TssEntry;
+    PKTSS64 TssBase;
+
+    /* Set the initial stack, idle thread and process for processor 0 */
+    LoaderBlock->KernelStack = (ULONG_PTR)KiP0BootStack;
+    LoaderBlock->Thread = (ULONG_PTR)&KiInitialThread;
+    LoaderBlock->Process = (ULONG_PTR)&KiInitialProcess.Pcb;
+    LoaderBlock->Prcb = (ULONG_PTR)&KiInitialPcr.Prcb;
+
+    /* Get GDT and IDT descriptors */
+    __sgdt(&GdtDescriptor.Limit);
+    __sidt(&IdtDescriptor.Limit);
+
+    /* Get the boot TSS from the GDT */
+    TssEntry = KiGetGdtEntry(GdtDescriptor.Base, KGDT64_SYS_TSS);
+    TssBase = KiGetGdtDescriptorBase(TssEntry);
+
+    /* Initialize PCR and TSS */
+    KiInitializeProcessorBootStructures(0,
+                                        &KiInitialPcr,
+                                        GdtDescriptor.Base,
+                                        IdtDescriptor.Base,
+                                        TssBase,
+                                        &KiInitialThread.Tcb,
+                                        KiP0BootStack,
+                                        KiP0DoubleFaultStack,
+                                        KiP0DoubleFaultStack,
+                                        KiP0DoubleFaultStack);
 }
 
 CODE_SEG("INIT")
@@ -283,6 +353,8 @@ KiInitializeKernelMachineDependent(
     IN PKPRCB Prcb,
     IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 {
+    ULONG64 FeatureBits = KeFeatureBits;
+
     /* Set boot-level flags */
     KeI386CpuType = Prcb->CpuType;
     KeI386CpuStep = Prcb->CpuStep;
@@ -292,25 +364,53 @@ KiInitializeKernelMachineDependent(
         KeProcessorRevision = Prcb->CpuStep;
 
     /* Set basic CPU Features that user mode can read */
+    SharedUserData->ProcessorFeatures[PF_FLOATING_POINT_PRECISION_ERRATA] = FALSE;
+    SharedUserData->ProcessorFeatures[PF_FLOATING_POINT_EMULATED] = FALSE;
     SharedUserData->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE] = TRUE;
-    SharedUserData->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = TRUE;
-    SharedUserData->ProcessorFeatures[PF_PPC_MOVEMEM_64BIT_OK] = TRUE;
-    SharedUserData->ProcessorFeatures[PF_PAE_ENABLED] = TRUE; // ???
-    SharedUserData->ProcessorFeatures[PF_NX_ENABLED] = TRUE;
-    SharedUserData->ProcessorFeatures[PF_FASTFAIL_AVAILABLE] = TRUE;
-    SharedUserData->ProcessorFeatures[PF_XSAVE_ENABLED] = TRUE;
     SharedUserData->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE] =
-        (Prcb->FeatureBits & KF_MMX) ? TRUE: FALSE;
+        (FeatureBits & KF_MMX) ? TRUE : FALSE;
     SharedUserData->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE] =
-        ((Prcb->FeatureBits & KF_FXSR) && (Prcb->FeatureBits & KF_XMMI)) ? TRUE: FALSE;
-    SharedUserData->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] =
-        ((Prcb->FeatureBits & KF_FXSR) && (Prcb->FeatureBits & KF_XMMI64)) ? TRUE: FALSE;
+        ((FeatureBits & KF_FXSR) && (FeatureBits & KF_XMMI)) ? TRUE : FALSE;
     SharedUserData->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] =
-        (Prcb->FeatureBits & KF_3DNOW) ? TRUE: FALSE;
+        (FeatureBits & KF_3DNOW) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = TRUE;
+    SharedUserData->ProcessorFeatures[PF_PAE_ENABLED] = TRUE; // ???
+    SharedUserData->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] =
+        ((FeatureBits & KF_FXSR) && (FeatureBits & KF_XMMI64)) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_SSE_DAZ_MODE_AVAILABLE] = FALSE; // ???
+    SharedUserData->ProcessorFeatures[PF_NX_ENABLED] = TRUE;
     SharedUserData->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE] =
-        (Prcb->FeatureBits & KF_SSE3) ? TRUE: FALSE;
+        (FeatureBits & KF_SSE3) ? TRUE : FALSE;
     SharedUserData->ProcessorFeatures[PF_COMPARE_EXCHANGE128] =
-        (Prcb->FeatureBits & KF_CMPXCHG16B) ? TRUE: FALSE;
+        (FeatureBits & KF_CMPXCHG16B) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_COMPARE64_EXCHANGE128] = FALSE; // ???
+    SharedUserData->ProcessorFeatures[PF_CHANNELS_ENABLED] = FALSE; // ???
+    SharedUserData->ProcessorFeatures[PF_XSAVE_ENABLED] =
+        (FeatureBits & KF_XSTATE) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_SECOND_LEVEL_ADDRESS_TRANSLATION] =
+        (FeatureBits & KF_SLAT) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED] =
+        (FeatureBits & KF_VIRT_FIRMWARE_ENABLED) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_RDWRFSGSBASE_AVAILABLE] =
+        (FeatureBits & KF_RDWRFSGSBASE) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_FASTFAIL_AVAILABLE] = TRUE;
+    SharedUserData->ProcessorFeatures[PF_RDRAND_INSTRUCTION_AVAILABLE] =
+        (FeatureBits & KF_RDRAND) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_RDTSCP_INSTRUCTION_AVAILABLE] =
+        (FeatureBits & KF_RDTSCP) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_RDPID_INSTRUCTION_AVAILABLE] = FALSE; // ???
+    SharedUserData->ProcessorFeatures[PF_SSSE3_INSTRUCTIONS_AVAILABLE] =
+        (FeatureBits & KF_SSSE3) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_SSE4_1_INSTRUCTIONS_AVAILABLE] =
+        (FeatureBits & KF_SSE4_1) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_SSE4_2_INSTRUCTIONS_AVAILABLE] =
+        (FeatureBits & KF_SSE4_2) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_AVX_INSTRUCTIONS_AVAILABLE] =
+        (FeatureBits & KF_AVX) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_AVX2_INSTRUCTIONS_AVAILABLE] =
+        (FeatureBits & KF_AVX2) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_AVX512F_INSTRUCTIONS_AVAILABLE] =
+        (FeatureBits & KF_AVX512F) ? TRUE : FALSE;
 
     /* Set the default NX policy (opt-in) */
     SharedUserData->NXSupportPolicy = NX_SUPPORT_POLICY_OPTIN;
@@ -341,6 +441,11 @@ KiInitializeKernelMachineDependent(
         SharedUserData->NXSupportPolicy = NX_SUPPORT_POLICY_ALWAYSOFF;
         Prcb->FeatureBits |= KF_NX_DISABLED;
     }
+
+#if DBG
+    /* Print applied kernel features/policies and boot CPU features */
+    KiReportCpuFeatures(Prcb);
+#endif
 }
 
 static LDR_DATA_TABLE_ENTRY LdrCoreEntries[3];
@@ -391,20 +496,17 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     FrLdrDbgPrint = LoaderBlock->u.I386.CommonDataArea;
     //FrLdrDbgPrint("Hello from KiSystemStartup!!!\n");
 
-    /* Save the loader block */
-    KeLoaderBlock = LoaderBlock;
-
     /* Get the current CPU number */
     Cpu = KeNumberProcessors++; // FIXME
 
     /* LoaderBlock initialization for Cpu 0 */
     if (Cpu == 0)
     {
-        /* Set the initial stack, idle thread and process */
-        LoaderBlock->KernelStack = (ULONG_PTR)P0BootStack;
-        LoaderBlock->Thread = (ULONG_PTR)&KiInitialThread;
-        LoaderBlock->Process = (ULONG_PTR)&KiInitialProcess.Pcb;
-        LoaderBlock->Prcb = (ULONG_PTR)&KiInitialPcr.Prcb;
+        /* Save the loader block */
+        KeLoaderBlock = LoaderBlock;
+
+        /* Prepare LoaderBlock, PCR, TSS with the P0 boot data */
+        KiInitializeP0BootStructures(LoaderBlock);
     }
 
     /* Get Pcr from loader block */
@@ -413,18 +515,11 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Set the PRCB for this Processor */
     KiProcessorBlock[Cpu] = &Pcr->Prcb;
 
-    /* Align stack to 16 bytes */
-    LoaderBlock->KernelStack &= ~(16 - 1);
-
-    /* Save the initial thread and stack */
-    InitialStack = LoaderBlock->KernelStack; // Checkme
+    /* Save the initial thread */
     InitialThread = (PKTHREAD)LoaderBlock->Thread;
 
     /* Set us as the current process */
     InitialThread->ApcState.Process = (PVOID)LoaderBlock->Process;
-
-    /* Initialize the PCR */
-    KiInitializePcr(Pcr, Cpu, InitialThread, (PVOID)KiDoubleFaultStack);
 
     /* Initialize the CPU features */
     KiInitializeCpu(Pcr);
@@ -432,11 +527,12 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Initial setup for the boot CPU */
     if (Cpu == 0)
     {
+        /* Set global feature bits */
+        KeFeatureBits = (ULONG64)Pcr->Prcb.FeatureBitsHigh << 32 |
+                        Pcr->Prcb.FeatureBits;
+
         /* Initialize the module list (ntos, hal, kdcom) */
         KiInitModuleList(LoaderBlock);
-
-        /* Setup the TSS descriptors and entries */
-        KiInitializeTss(Pcr->TssBase, InitialStack);
 
         /* Setup the IDT */
         KeInitExceptions();
@@ -473,7 +569,13 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Machine specific kernel initialization */
     if (Cpu == 0) KiInitializeKernelMachineDependent(&Pcr->Prcb, LoaderBlock);
 
+    /* Initialize extended state management */
+    KiInitializeXStateConfiguration(Cpu);
+
+    /* Calculate the initial stack pointer */
+    InitialStack = ALIGN_DOWN_BY(LoaderBlock->KernelStack - KeXStateLength, 64);
+
     /* Switch to new kernel stack and start kernel bootstrapping */
-    KiSwitchToBootStack(InitialStack & ~3);
+    KiSwitchToBootStack(InitialStack);
 }
 

@@ -2,35 +2,20 @@
  * Regedit treeview
  *
  * Copyright (C) 2002 Robert Dickenson <robd@reactos.org>
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * LICENSE: LGPL-2.1-or-later (https://spdx.org/licenses/LGPL-2.1-or-later)
  */
 
 #include "regedit.h"
 
-/* Global variables and constants  */
-/* Image_Open, Image_Closed, and Image_Root - integer variables for indexes of the images.  */
-/* CX_ICON and CY_ICON - width and height of an icon.  */
-/* NUM_ICON - number of icons to add to the image list.  */
-static int Image_Open = 0;
-static int Image_Closed = 0;
-static int Image_Root = 0;
+/* Global variables and constants */
+/* Image_Open, Image_Closed, and Image_Root - integer variables for indexes of the images */
+static int Image_Open;
+static int Image_Closed;
+static int Image_Root;
 
 static LPWSTR pathBuffer;
 
-#define NUM_ICONS   3
+#define NUM_ICONS   3 /* number of icons to add to the image list */
 
 /* External resources in shell32.dll */
 #define IDI_SHELL_FOLDER             4
@@ -90,14 +75,21 @@ LPCWSTR GetItemPath(HWND hwndTV, HTREEITEM hItem, HKEY* phRootKey)
     int pathLen = 0, maxLen;
 
     *phRootKey = NULL;
-    if (!pathBuffer) pathBuffer = HeapAlloc(GetProcessHeap(), 0, 1024);
-    if (!pathBuffer) return NULL;
-    *pathBuffer = 0;
-    maxLen = (int) HeapSize(GetProcessHeap(), 0, pathBuffer);
-    if (maxLen == -1) return NULL;
-    if (!hItem) hItem = TreeView_GetSelection(hwndTV);
-    if (!hItem) return NULL;
-    if (!get_item_path(hwndTV, hItem, phRootKey, &pathBuffer, &pathLen, &maxLen))
+
+    if (!pathBuffer)
+        pathBuffer = HeapAlloc(GetProcessHeap(), 0, 1024);
+    if (!pathBuffer)
+        return NULL;
+
+    *pathBuffer = UNICODE_NULL;
+
+    maxLen = (int)HeapSize(GetProcessHeap(), 0, pathBuffer);
+
+    if (!hItem)
+    {
+        hItem = TreeView_GetSelection(hwndTV);
+    }
+    if (maxLen == -1 || !hItem || !get_item_path(hwndTV, hItem, phRootKey, &pathBuffer, &pathLen, &maxLen))
     {
         return NULL;
     }
@@ -353,7 +345,7 @@ HTREEITEM InsertNode(HWND hwndTV, HTREEITEM hItem, LPWSTR name)
     if (!TreeView_GetItem(hwndTV, &item))
         return FALSE;
 
-    if ((item.state & TVIS_EXPANDEDONCE) && (item.cChildren > 0))
+    if (item.state & TVIS_EXPANDEDONCE)
     {
         hNewItem = AddEntryToTree(hwndTV, hItem, name, 0, 0);
         SendMessageW(hwndTV, TVM_SORTCHILDREN, 0, (LPARAM) hItem);
@@ -432,7 +424,6 @@ static BOOL InitTreeViewItems(HWND hwndTV, LPWSTR pHostName)
     (void)TreeView_Select(hwndTV, hRoot, TVGN_CARET);
     return TRUE;
 }
-
 
 /*
  * InitTreeViewImageLists - creates an image list, adds three bitmaps
@@ -569,7 +560,6 @@ done:
     return TRUE;
 }
 
-
 BOOL CreateNewKey(HWND hwndTV, HTREEITEM hItem)
 {
     WCHAR szNewKeyFormat[128];
@@ -583,6 +573,8 @@ BOOL CreateNewKey(HWND hwndTV, HTREEITEM hItem)
     HTREEITEM hNewItem;
 
     pszKeyPath = GetItemPath(hwndTV, hItem, &hRootKey);
+    if (!pszKeyPath)
+        return bSuccess;
     if (pszKeyPath[0] == L'\0')
         hKey = hRootKey;
     else if (RegOpenKeyW(hRootKey, pszKeyPath, &hKey) != ERROR_SUCCESS)
@@ -645,8 +637,9 @@ BOOL TreeWndNotifyProc(HWND hWnd, WPARAM wParam, LPARAM lParam, BOOL *Result)
 
             UpdateAddress(pnmtv->itemNew.hItem, NULL, NULL, TRUE);
 
-            /* Disable the Permissions menu item for 'My Computer' */
+            /* Disable the Permissions and new key menu items for 'My Computer' */
             EnableMenuItem(hMenuFrame, ID_EDIT_PERMISSIONS, MF_BYCOMMAND | (hParentItem ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(hMenuFrame, ID_EDIT_NEW_KEY, MF_BYCOMMAND | (hParentItem ? MF_ENABLED : MF_GRAYED));
 
             /*
              * Disable Delete/Rename menu options for 'My Computer' (first item so doesn't have any parent)
@@ -674,7 +667,9 @@ BOOL TreeWndNotifyProc(HWND hWnd, WPARAM wParam, LPARAM lParam, BOOL *Result)
             break;
         case TVN_BEGINLABELEDIT:
         {
-            LPNMTVDISPINFO ptvdi = (LPNMTVDISPINFO) lParam;
+            LPNMTVDISPINFO ptvdi = (LPNMTVDISPINFO)lParam;
+            HWND hWndFocus = GetFocus();
+
             /* cancel label edit for rootkeys */
             if (!TreeView_GetParent(g_pChildWnd->hTreeWnd, ptvdi->item.hItem) ||
                 !TreeView_GetParent(g_pChildWnd->hTreeWnd, TreeView_GetParent(g_pChildWnd->hTreeWnd, ptvdi->item.hItem)))
@@ -685,6 +680,12 @@ BOOL TreeWndNotifyProc(HWND hWnd, WPARAM wParam, LPARAM lParam, BOOL *Result)
             {
                 *Result = FALSE;
             }
+
+            /* cancel label edit if VK_DELETE accelerator opened a MessageBox */
+            if (hWndFocus != g_pChildWnd->hTreeWnd && hWndFocus != TreeView_GetEditControl(g_pChildWnd->hTreeWnd))
+            {
+                *Result = TRUE;
+            }
             return TRUE;
         }
         case TVN_ENDLABELEDIT:
@@ -692,7 +693,7 @@ BOOL TreeWndNotifyProc(HWND hWnd, WPARAM wParam, LPARAM lParam, BOOL *Result)
             LPCWSTR keyPath;
             HKEY hRootKey;
             HKEY hKey = NULL;
-            LPNMTVDISPINFO ptvdi = (LPNMTVDISPINFO) lParam;
+            LPNMTVDISPINFO ptvdi = (LPNMTVDISPINFO)lParam;
             LONG nRenResult;
             LONG lResult = TRUE;
             WCHAR szBuffer[MAX_PATH];

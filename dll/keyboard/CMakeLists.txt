@@ -16,6 +16,7 @@ list(APPEND _keyboard_layouts
     kbdbu
     kbdbur
     kbdcan
+    kbdcmk
     kbdcr
     kbdcz
     kbdcz1
@@ -31,6 +32,8 @@ list(APPEND _keyboard_layouts
     kbdgneo
     kbdgr
     kbdgr1
+    kbdgre1
+    kbdgrist
     kbdhe
     kbdheb
     kbdhu
@@ -103,9 +106,6 @@ foreach(_keyboard_layout ${_keyboard_layouts})
     else()
         # Use a custom linker script
         target_link_options(${_keyboard_layout} PRIVATE "-Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/kbdlayout.lds")
-
-        # Avoid "universal character names are only valid in C++ and C99" error.
-        set_property(TARGET ${_keyboard_layout} PROPERTY C_STANDARD 99)
     endif()
 
     # dynamic analysis switches

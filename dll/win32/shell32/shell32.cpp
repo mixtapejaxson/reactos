@@ -137,8 +137,8 @@ public:
     HRESULT Initialize(LPFNCREATEINSTANCE lpfnCI, PLONG pcRefDll, const IID *riidInstx);
 
     // IClassFactory
-    virtual HRESULT WINAPI CreateInstance(IUnknown * pUnkOuter, REFIID riid, LPVOID *ppvObject);
-    virtual HRESULT WINAPI LockServer(BOOL fLock);
+    STDMETHOD(CreateInstance)(IUnknown * pUnkOuter, REFIID riid, LPVOID *ppvObject) override;
+    STDMETHOD(LockServer)(BOOL fLock) override;
 
 BEGIN_COM_MAP(IDefClFImpl)
     COM_INTERFACE_ENTRY_IID(IID_IClassFactory, IClassFactory)
@@ -275,11 +275,14 @@ BEGIN_OBJECT_MAP(ObjectMap)
     OBJECT_ENTRY(CLSID_ShellFSFolder, CFSFolder)
     OBJECT_ENTRY(CLSID_MyComputer, CDrivesFolder)
     OBJECT_ENTRY(CLSID_ShellDesktop, CDesktopFolder)
+    OBJECT_ENTRY(CLSID_ShellFileDefExt, CFileDefExt)
+    OBJECT_ENTRY(CLSID_ShellDrvDefExt, CDrvDefExt)
     OBJECT_ENTRY(CLSID_ShellItem, CShellItem)
     OBJECT_ENTRY(CLSID_ShellLink, CShellLink)
     OBJECT_ENTRY(CLSID_Shell, CShellDispatch)
     OBJECT_ENTRY(CLSID_DragDropHelper, CDropTargetHelper)
     OBJECT_ENTRY(CLSID_ControlPanel, CControlPanelFolder)
+    OBJECT_ENTRY(CLSID_OpenControlPanel, COpenControlPanel)
     OBJECT_ENTRY(CLSID_MyDocuments, CMyDocsFolder)
     OBJECT_ENTRY(CLSID_NetworkPlaces, CNetFolder)
     OBJECT_ENTRY(CLSID_FontsFolderShortcut, CFontsFolder)
@@ -290,6 +293,7 @@ BEGIN_OBJECT_MAP(ObjectMap)
     OBJECT_ENTRY(CLSID_OpenWithMenu, COpenWithMenu)
     OBJECT_ENTRY(CLSID_NewMenu, CNewMenu)
     OBJECT_ENTRY(CLSID_SendToMenu, CSendToMenu)
+    OBJECT_ENTRY(CLSID_CopyAsPathMenu, CCopyAsPathMenu)
     OBJECT_ENTRY(CLSID_CopyToMenu, CCopyToMenu)
     OBJECT_ENTRY(CLSID_MoveToMenu, CMoveToMenu)
     OBJECT_ENTRY(CLSID_StartMenu, CStartMenuDummy)
@@ -422,6 +426,19 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     return hResult;
 }
 
+static HRESULT UpdateRegistryFromResource(BOOL Register)
+{
+    static const BYTE resid[] =
+    {
+        IDR_FOLDEROPTIONS,
+        IDR_EXPLORER,
+    };
+    HRESULT hr = S_OK;
+    for (SIZE_T i = 0; i < _countof(resid) && SUCCEEDED(hr); ++i)
+        hr = gModule.UpdateRegistryFromResource(resid[i], Register, NULL);
+    return hr;
+}
+
 /***********************************************************************
  *              DllRegisterServer (SHELL32.@)
  */
@@ -433,8 +450,7 @@ STDAPI DllRegisterServer()
     if (FAILED(hr))
         return hr;
 
-    hr = gModule.UpdateRegistryFromResource(IDR_FOLDEROPTIONS, TRUE, NULL);
-    if (FAILED(hr))
+    if (FAILED(hr = UpdateRegistryFromResource(TRUE)))
         return hr;
 
     hr = SHELL_RegisterShellFolders();
@@ -455,8 +471,7 @@ STDAPI DllUnregisterServer()
     if (FAILED(hr))
         return hr;
 
-    hr = gModule.UpdateRegistryFromResource(IDR_FOLDEROPTIONS, FALSE, NULL);
-    if (FAILED(hr))
+    if (FAILED(hr = UpdateRegistryFromResource(FALSE)))
         return hr;
 
     return S_OK;

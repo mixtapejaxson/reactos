@@ -49,6 +49,7 @@ VOID ShowLastError(VOID)
     {
         LPTSTR lpMsgBuf = NULL;
         TCHAR szTitle[MAX_STRING_LEN];
+        TCHAR szFallback[42], *pszMessage = szFallback;
 
         LoadString(Globals.hInstance, STRING_ERROR, szTitle, _countof(szTitle));
 
@@ -60,7 +61,12 @@ VOID ShowLastError(VOID)
                       0,
                       NULL);
 
-        MessageBox(Globals.hMainWnd, lpMsgBuf, szTitle, MB_OK | MB_ICONERROR);
+        if (lpMsgBuf)
+            pszMessage = lpMsgBuf;
+        else
+            wsprintfW(szFallback, L"%d", error);
+
+        MessageBox(Globals.hMainWnd, pszMessage, szTitle, MB_OK | MB_ICONERROR);
         LocalFree(lpMsgBuf);
     }
 }
@@ -110,6 +116,33 @@ void UpdateWindowCaption(BOOL clearModifyAlert)
 
     SetWindowText(Globals.hMainWnd, szCaption);
 }
+
+VOID WaitCursor(BOOL bBegin)
+{
+    static HCURSOR s_hWaitCursor = NULL;
+    static HCURSOR s_hOldCursor = NULL;
+    static INT s_nLock = 0;
+
+    if (bBegin)
+    {
+        if (s_nLock++ == 0)
+        {
+            if (s_hWaitCursor == NULL)
+                s_hWaitCursor = LoadCursor(NULL, IDC_WAIT);
+            s_hOldCursor = SetCursor(s_hWaitCursor);
+        }
+        else
+        {
+            SetCursor(s_hWaitCursor);
+        }
+    }
+    else
+    {
+        if (--s_nLock == 0)
+            SetCursor(s_hOldCursor);
+    }
+}
+
 
 VOID DIALOG_StatusBarAlignParts(VOID)
 {
@@ -164,7 +197,7 @@ int DIALOG_StringMsgBox(HWND hParent, int formatId, LPCTSTR szString, DWORD dwFl
 
     /* Load and format szMessage */
     LoadString(Globals.hInstance, formatId, szResource, _countof(szResource));
-    _sntprintf(szMessage, _countof(szMessage), szResource, szString);
+    StringCchPrintf(szMessage, _countof(szMessage), szResource, szString);
 
     /* Load szCaption */
     if ((dwFlags & MB_ICONMASK) == MB_ICONEXCLAMATION)
@@ -220,11 +253,16 @@ static BOOL DoSaveFile(VOID)
     HANDLE hFile;
     DWORD cchText;
 
-    hFile = CreateFileW(Globals.szFileName, GENERIC_WRITE, FILE_SHARE_WRITE,
-                        NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    WaitCursor(TRUE);
+
+    /* Use OPEN_ALWAYS instead of CREATE_ALWAYS in order to succeed
+     * even if the file has HIDDEN or SYSTEM attributes */
+    hFile = CreateFileW(Globals.szFileName, GENERIC_WRITE, FILE_SHARE_READ,
+                        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
     {
         ShowLastError();
+        WaitCursor(FALSE);
         return FALSE;
     }
 
@@ -251,6 +289,8 @@ static BOOL DoSaveFile(VOID)
         }
     }
 
+    /* Truncate the file and close it */
+    SetEndOfFile(hFile);
     CloseHandle(hFile);
 
     if (bRet)
@@ -259,6 +299,7 @@ static BOOL DoSaveFile(VOID)
         SetFileName(Globals.szFileName);
     }
 
+    WaitCursor(FALSE);
     return bRet;
 }
 
@@ -307,6 +348,9 @@ VOID DoOpenFile(LPCTSTR szFileName)
     if (!DoCloseFile())
         return;
 
+    WaitCursor(TRUE);
+    SetWindowText(Globals.hEdit, NULL);
+
     hFile = CreateFile(szFileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
@@ -347,6 +391,7 @@ VOID DoOpenFile(LPCTSTR szFileName)
 done:
     if (hFile != INVALID_HANDLE_VALUE)
         CloseHandle(hFile);
+    WaitCursor(FALSE);
 }
 
 VOID DIALOG_FileNew(VOID)
@@ -355,6 +400,8 @@ VOID DIALOG_FileNew(VOID)
     if (!DoCloseFile())
         return;
 
+    WaitCursor(TRUE);
+
     SetWindowText(Globals.hEdit, NULL);
     SendMessage(Globals.hEdit, EM_EMPTYUNDOBUFFER, 0, 0);
     Globals.iEoln = EOLN_CRLF;
@@ -362,13 +409,20 @@ VOID DIALOG_FileNew(VOID)
 
     NOTEPAD_EnableSearchMenu();
     DIALOG_StatusBarUpdateAll();
+
+    WaitCursor(FALSE);
 }
 
 VOID DIALOG_FileNewWindow(VOID)
 {
     TCHAR pszNotepadExe[MAX_PATH];
+
+    WaitCursor(TRUE);
+
     GetModuleFileName(NULL, pszNotepadExe, _countof(pszNotepadExe));
     ShellExecute(NULL, NULL, pszNotepadExe, NULL, NULL, SW_SHOWNORMAL);
+
+    WaitCursor(FALSE);
 }
 
 VOID DIALOG_FileOpen(VOID)
@@ -773,7 +827,7 @@ VOID DIALOG_SearchNext(BOOL bDown)
     else
         Globals.find.Flags &= ~FR_DOWN;
 
-    if (Globals.find.lpstrFindWhat != NULL)
+    if (Globals.find.lpstrFindWhat != NULL && *Globals.find.lpstrFindWhat)
         NOTEPAD_FindNext(&Globals.find, FALSE, TRUE);
     else
         DIALOG_Search();
@@ -865,6 +919,10 @@ VOID DIALOG_GoTo(VOID)
     else
         ich = (INT)SendMessage(Globals.hEdit, EM_LINEINDEX, GotoData.iLine, 0);
 
+    /* EM_LINEINDEX can return -1 on failure */
+    if (ich < 0)
+        ich = 0;
+
     /* Move the caret */
     SendMessage(Globals.hEdit, EM_SETSEL, ich, ich);
     SendMessage(Globals.hEdit, EM_SCROLLCARET, 0, 0);
@@ -872,15 +930,18 @@ VOID DIALOG_GoTo(VOID)
 
 VOID DIALOG_StatusBarUpdateCaretPos(VOID)
 {
-    int line, col;
+    int line, ich, col;
     TCHAR buff[MAX_PATH];
     DWORD dwStart, dwSize;
 
     SendMessage(Globals.hEdit, EM_GETSEL, (WPARAM)&dwStart, (LPARAM)&dwSize);
-    line = SendMessage(Globals.hEdit, EM_LINEFROMCHAR, (WPARAM)dwStart, 0);
-    col = dwStart - SendMessage(Globals.hEdit, EM_LINEINDEX, (WPARAM)line, 0);
+    line = (int)SendMessage(Globals.hEdit, EM_LINEFROMCHAR, (WPARAM)dwStart, 0);
+    ich = (int)SendMessage(Globals.hEdit, EM_LINEINDEX, (WPARAM)line, 0);
 
-    _stprintf(buff, Globals.szStatusBarLineCol, line + 1, col + 1);
+    /* EM_LINEINDEX can return -1 on failure */
+    col = ((ich < 0) ? 0 : (dwStart - ich));
+
+    StringCchPrintf(buff, _countof(buff), Globals.szStatusBarLineCol, line + 1, col + 1);
     SendMessage(Globals.hStatusBar, SB_SETTEXT, SBPART_CURPOS, (LPARAM)buff);
 }
 

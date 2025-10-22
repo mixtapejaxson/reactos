@@ -1,6 +1,7 @@
 
 remove_definitions(-D_WIN32_WINNT=0x502 -D_WIN32_IE=0x600)
 
+add_definitions(-D__ROS_LONG64__)
 add_definitions(-DUSE_WINE_TODOS -DWINETEST_USE_DBGSTR_LONGLONG)
 
 list(APPEND SOURCE
@@ -45,6 +46,11 @@ add_executable(comctl32_winetest
 if(MSVC AND ARCH STREQUAL "amd64")
     # warning C4334: '<<': result of 32-bit shift implicitly converted to 64 bits (was 64-bit shift intended?)
     target_compile_options(comctl32_winetest PRIVATE /wd4334)
+endif()
+
+if(MSVC)
+    #  warning C4045: 'large_truncated_80_w': array bounds overflow
+    target_compile_options(comctl32_winetest PRIVATE /wd4045)
 endif()
 
 target_compile_options(comctl32_winetest PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wno-format>)

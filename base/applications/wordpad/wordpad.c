@@ -843,8 +843,15 @@ static BOOL DoSaveFile(LPCWSTR wszSaveFileName, WPARAM format)
     EDITSTREAM stream;
     LRESULT ret;
 
+#ifdef __REACTOS__
+    /* Use OPEN_ALWAYS instead of CREATE_ALWAYS in order to succeed
+     * even if the file has HIDDEN or SYSTEM attributes */
+    hFile = CreateFileW(wszSaveFileName, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, NULL);
+#else
     hFile = CreateFileW(wszSaveFileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
         FILE_ATTRIBUTE_NORMAL, NULL);
+#endif
 
     if(hFile == INVALID_HANDLE_VALUE)
     {
@@ -870,6 +877,10 @@ static BOOL DoSaveFile(LPCWSTR wszSaveFileName, WPARAM format)
 
     ret = SendMessageW(hEditorWnd, EM_STREAMOUT, format, (LPARAM)&stream);
 
+#ifdef __REACTOS__
+    /* Truncate the file and close it */
+    SetEndOfFile(hFile);
+#endif
     CloseHandle(hFile);
 
     SetFocus(hEditorWnd);
@@ -2035,9 +2046,9 @@ static LRESULT OnNotify( HWND hWnd, LPARAM lParam)
 
         update_font_list();
 
-        sprintf( buf,"selection = %d..%d, line count=%ld",
+        sprintf( buf,"Selection: %d..%d | Lines: %u",
                  pSC->chrg.cpMin, pSC->chrg.cpMax,
-                SendMessageW(hwndEditor, EM_GETLINECOUNT, 0, 0));
+                (UINT)SendMessageW(hwndEditor, EM_GETLINECOUNT, 0, 0));
         SetWindowTextA(GetDlgItem(hWnd, IDC_STATUSBAR), buf);
         SendMessageW(hWnd, WM_USER, 0, 0);
         return 1;
@@ -2283,6 +2294,9 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         tr.chrg.cpMax = nLen;
         tr.lpstrText = data;
         SendMessageW(hwndEditor, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+#ifdef __REACTOS__
+        data[tr.chrg.cpMax - tr.chrg.cpMin] = UNICODE_NULL;
+#endif
         MessageBoxW(NULL, data, wszAppTitle, MB_OK);
         HeapFree( GetProcessHeap(), 0, data );
 

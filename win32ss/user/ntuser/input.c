@@ -42,7 +42,7 @@ IntLastInputTick(BOOL bUpdate)
 /*
  * DoTheScreenSaver
  *
- * Check if scrensaver should be started and sends message to SAS window
+ * Check if screensaver should be started and sends message to SAS window
  */
 VOID FASTCALL
 DoTheScreenSaver(VOID)
@@ -204,7 +204,7 @@ RawInputThreadMain(VOID)
                 UserRegisterHotKey(PWND_BOTTOM, IDHK_SNAP_UP, MOD_WIN, VK_UP);
                 UserRegisterHotKey(PWND_BOTTOM, IDHK_SNAP_DOWN, MOD_WIN, VK_DOWN);
                 // Register the debug hotkeys.
-                StartDebugHotKeys();
+                SetDebugHotKeys();
                 UserLeave();
             }
         }

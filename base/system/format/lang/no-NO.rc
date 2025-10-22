@@ -1,9 +1,16 @@
+/*
+ * PROJECT:     Disk Format Utility
+ * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
+ * PURPOSE:     Norwegian resource file
+ * TRANSLATOR:  Copyright 2006 Lars Martin Hambro (LMH1) <lars_martin4@hotmail.com>
+ */
+
 LANGUAGE LANG_NORWEGIAN, SUBLANG_NEUTRAL
 
 STRINGTABLE
 BEGIN
     STRING_HELP "bruk: %s stasjon: [-FS:fil-system] [-V:merke] [-Q] [-A:størrelse] [-C]\n\n\
-  [stasjon:]         Spesifisere stasjon til formater.\n\
+  [stasjon:]       Spesifisere stasjon til formater.\n\
   -FS:file-system  Spesifisere typen av fil system (%s).\n\
   -V:merke         Spesifisere volum merke.\n\
   -Q               Fullføre en rask formatering.\n\
@@ -21,7 +28,7 @@ BEGIN
     STRING_FMIFS_FAIL "Kunne ikke befinne seg FMIFS artikkel momenter.\n\n"
     STRING_UNKNOW_ARG "Ukjent argument: %s\n"
     STRING_DRIVE_PARM "Obligatorisk drive parameter er mistet.\n\n"
-    STRING_ERROR_DRIVE_TYPE "Kunne ikke få drive typen"
+    STRING_ERROR_DRIVE_TYPE "Kunne ikke få drive typen.\n"
     STRING_INSERT_DISK "Sett inn en ny diskett i stasjon %C:\nog trykk på Enter når du er klar..."
     STRING_NO_VOLUME "Kunne ikke spørre om volumet"
     STRING_NO_VOLUME_SIZE "Kunne ikke spørre om volumet størrelse"

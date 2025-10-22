@@ -56,9 +56,12 @@ BOOLEAN PcFindPciBios(PPCI_REGISTRY_INFO BusData);
 extern UCHAR FrldrBootDrive;
 extern ULONG FrldrBootPartition;
 
+CONFIGURATION_TYPE
+DiskGetConfigType(
+    _In_ UCHAR DriveNumber);
+
 LONG DiskReportError(BOOLEAN bShowError);
 BOOLEAN DiskResetController(UCHAR DriveNumber);
-// BOOLEAN DiskGetExtendedDriveParameters(UCHAR DriveNumber, PVOID Buffer, USHORT BufferSize);
 
 BOOLEAN PcDiskReadLogicalSectors(UCHAR DriveNumber, ULONGLONG SectorNumber, ULONG SectorCount, PVOID Buffer);
 BOOLEAN PcDiskGetDriveGeometry(UCHAR DriveNumber, PGEOMETRY DriveGeometry);
@@ -67,7 +70,11 @@ ULONG PcDiskGetCacheableBlockCount(UCHAR DriveNumber);
 TIMEINFO* PcGetTime(VOID);
 
 BOOLEAN PcInitializeBootDevices(VOID);
-PCONFIGURATION_COMPONENT_DATA PcHwDetect(VOID);
+
+PCONFIGURATION_COMPONENT_DATA
+PcHwDetect(
+    _In_opt_ PCSTR Options);
+
 VOID PcHwIdle(VOID);
 
 extern BIOS_MEMORY_MAP PcBiosMemoryMap[];

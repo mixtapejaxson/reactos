@@ -1,10 +1,9 @@
 /*
- * PROJECT:     PAINT for ReactOS
- * LICENSE:     LGPL
- * FILE:        base/applications/mspaint/toolbox.cpp
- * PURPOSE:     Window procedure of the main window and all children apart from
- *              hPalWin, hToolSettings and hSelection
- * PROGRAMMERS: Benedikt Freisen
+ * PROJECT:    PAINT for ReactOS
+ * LICENSE:    LGPL-2.0-or-later (https://spdx.org/licenses/LGPL-2.0-or-later)
+ * PURPOSE:    Window procedure of the main window and all children apart from
+ *             hPalWin, hToolSettings and hSelection
+ * COPYRIGHT:  Copyright 2015 Benedikt Freisen <b.freisen@gmx.net>
  */
 
 #include "precomp.h"
@@ -13,32 +12,56 @@ CToolBox toolBoxContainer;
 
 /* FUNCTIONS ********************************************************/
 
+LRESULT CALLBACK
+CPaintToolBar::ToolBarWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    WNDPROC oldWndProc = (WNDPROC)::GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    if (uMsg == WM_LBUTTONUP)
+    {
+        // We have to detect clicking on toolbar even if no change of pressed button
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        INT index = (INT)::SendMessageW(hwnd, TB_HITTEST, 0, (LPARAM)&pt);
+        if (index >= 0)
+        {
+            TBBUTTON button;
+            if (::SendMessageW(hwnd, TB_GETBUTTON, index, (LPARAM)&button))
+                ::PostMessageW(::GetParent(hwnd), WM_COMMAND, button.idCommand, 0);
+        }
+    }
+    return ::CallWindowProc(oldWndProc, hwnd, uMsg, wParam, lParam);
+}
+
 BOOL CPaintToolBar::DoCreate(HWND hwndParent)
 {
     // NOTE: The horizontal line above the toolbar is hidden by CCS_NODIVIDER style.
-    RECT toolbarPos = { 0, 0, CX_TOOLBAR, CY_TOOLBAR };
+    RECT toolbarPos =
+    {
+        0, 0,
+        CX_TOOLBAR + 2 * GetSystemMetrics(SM_CXBORDER),
+        CY_TOOLBAR + 2 * GetSystemMetrics(SM_CYBORDER)
+    };
     DWORD style = WS_CHILD | WS_VISIBLE | CCS_NOPARENTALIGN | CCS_VERT | CCS_NORESIZE |
                   TBSTYLE_TOOLTIPS | TBSTYLE_FLAT;
-    if (!CWindow::Create(TOOLBARCLASSNAME, hwndParent, toolbarPos, NULL, style))
+    if (!CWindow::Create(TOOLBARCLASSNAMEW, hwndParent, toolbarPos, NULL, style))
         return FALSE;
 
     HIMAGELIST hImageList = ImageList_Create(16, 16, ILC_COLOR24 | ILC_MASK, 16, 0);
     SendMessage(TB_SETIMAGELIST, 0, (LPARAM)hImageList);
 
-    HBITMAP hbmIcons = (HBITMAP)::LoadImage(hProgInstance, MAKEINTRESOURCE(IDB_TOOLBARICONS),
-                                            IMAGE_BITMAP, 256, 16, 0);
+    HBITMAP hbmIcons = (HBITMAP)::LoadImageW(g_hinstExe, MAKEINTRESOURCEW(IDB_TOOLBARICONS),
+                                             IMAGE_BITMAP, 256, 16, 0);
     ImageList_AddMasked(hImageList, hbmIcons, RGB(255, 0, 255));
     ::DeleteObject(hbmIcons);
 
     SendMessage(TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
 
-    TCHAR szToolTip[30];
+    WCHAR szToolTip[30];
     TBBUTTON tbbutton;
     ZeroMemory(&tbbutton, sizeof(tbbutton));
     tbbutton.fsStyle = TBSTYLE_CHECKGROUP;
     for (INT i = 0; i < NUM_TOOLS; i++)
     {
-        ::LoadString(hProgInstance, IDS_TOOLTIP1 + i, szToolTip, _countof(szToolTip));
+        ::LoadStringW(g_hinstExe, IDS_TOOLTIP1 + i, szToolTip, _countof(szToolTip));
         tbbutton.iString   = (INT_PTR)szToolTip;
         tbbutton.fsState   = TBSTATE_ENABLED | ((i % 2 == 1) ? TBSTATE_WRAP : 0);
         tbbutton.idCommand = ID_FREESEL + i;
@@ -49,6 +72,8 @@ BOOL CPaintToolBar::DoCreate(HWND hwndParent)
     SendMessage(TB_CHECKBUTTON, ID_PEN, MAKELPARAM(TRUE, 0));
     SendMessage(TB_SETMAXTEXTROWS, 0, 0);
     SendMessage(TB_SETBUTTONSIZE, 0, MAKELPARAM(CXY_TB_BUTTON, CXY_TB_BUTTON));
+
+    SetWindowLongPtr(GWLP_USERDATA, SetWindowLongPtr(GWLP_WNDPROC, (LONG_PTR)ToolBarWndProc));
     return TRUE;
 }
 
@@ -97,6 +122,7 @@ static const COMMAND_TO_TOOL CommandToToolMapping[] =
     { ID_ELLIPSE, TOOL_ELLIPSE },
     { ID_RRECT, TOOL_RRECT },
 };
+static_assert(_countof(CommandToToolMapping) == TOOL_MAX, "Logical error");
 
 LRESULT CToolBox::OnCommand(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
 {
@@ -114,7 +140,7 @@ LRESULT CToolBox::OnCommand(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHand
 
 LRESULT CToolBox::OnToolsModelToolChanged(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
 {
-    selectionModel.m_bShow = FALSE;
+    selectionModel.HideSelection();
     toolsModel.resetTool(); // resets the point-buffer of the polygon and bezier functions
 
     // Check the toolbar button

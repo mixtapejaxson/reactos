@@ -1618,6 +1618,45 @@ EnumServicesStatusExW(SC_HANDLE hSCManager,
 
 
 /**********************************************************************
+ *  I_ScSendPnPMessage
+ *
+ * Undocumented
+ *
+ * @unimplemented
+ */
+BOOL
+WINAPI
+I_ScSendPnPMessage(
+    _In_ SERVICE_STATUS_HANDLE hServiceStatus,
+    _In_ DWORD dwControlCode,
+    _In_ DWORD dwEventType,
+    _In_ PVOID pEventData)
+{
+    BOOL bResult;
+
+    TRACE("I_ScSendPnPMessage(%p %lu %lu %p)\n",
+          hServiceStatus, dwControlCode, dwEventType, pEventData);
+
+    RpcTryExcept
+    {
+        bResult = RI_ScSendPnPMessage((RPC_SERVICE_STATUS_HANDLE)hServiceStatus,
+                                       dwControlCode,
+                                       dwEventType,
+                                       ((PDEV_BROADCAST_HDR)pEventData)->dbch_size,
+                                       pEventData);
+    }
+    RpcExcept(EXCEPTION_EXECUTE_HANDLER)
+    {
+        SetLastError(ScmRpcStatusToWinError(RpcExceptionCode()));
+        bResult = FALSE;
+    }
+    RpcEndExcept;
+
+    return bResult;
+}
+
+
+/**********************************************************************
  *  GetServiceDisplayNameA
  *
  * @implemented
@@ -1892,6 +1931,58 @@ I_ScGetCurrentGroupStateW(SC_HANDLE hSCManager,
         TRACE("RI_ScGetCurrentGroupStateW() failed (Error %lu)\n", dwError);
         SetLastError(dwError);
     }
+
+    return dwError;
+}
+
+
+/**********************************************************************
+ *  I_ScValidatePnpService
+ *
+ * Undocumented
+ *
+ * @implemented
+ */
+DWORD
+WINAPI
+I_ScValidatePnpService(
+    _In_ LPCWSTR pszMachineName,
+    _In_ LPCWSTR pszServiceName,
+    _Out_ SERVICE_STATUS_HANDLE *phServiceStatus)
+{
+    SC_RPC_HANDLE hSCManager = NULL;
+    SERVICE_STATUS_HANDLE hServiceStatus = NULL;
+    DWORD dwError;
+
+    TRACE("I_ScValidatePnpService(%S %S %p)\n",
+         pszMachineName, pszServiceName, phServiceStatus);
+
+    hSCManager = OpenSCManagerW(pszMachineName,
+                                SERVICES_ACTIVE_DATABASEW,
+                                SC_MANAGER_CONNECT);
+    if (hSCManager == NULL)
+    {
+        dwError = GetLastError();
+        goto done;
+    }
+
+    RpcTryExcept
+    {
+        dwError = RI_ScValidatePnPService(hSCManager,
+                                          (LPWSTR)pszServiceName,
+                                          (RPC_SERVICE_STATUS_HANDLE *)&hServiceStatus);
+    }
+    RpcExcept(EXCEPTION_EXECUTE_HANDLER)
+    {
+        dwError = ScmRpcStatusToWinError(RpcExceptionCode());
+    }
+    RpcEndExcept
+
+    *phServiceStatus = hServiceStatus;
+
+done:
+    if (hSCManager != NULL)
+        CloseServiceHandle(hSCManager);
 
     return dwError;
 }

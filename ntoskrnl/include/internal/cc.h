@@ -193,6 +193,7 @@ typedef struct _ROS_SHARED_CACHE_MAP
     LIST_ENTRY CacheMapVacbListHead;
     BOOLEAN PinAccess;
     KSPIN_LOCK CacheMapLock;
+    KGUARDED_MUTEX FlushCacheLock;
 #if DBG
     BOOLEAN Trace; /* enable extra trace output for this cache map and it's VACBs */
 #endif
@@ -509,3 +510,7 @@ CcRosVacbDecRefCount(
 }
 #define CcRosVacbGetRefCount(vacb) InterlockedCompareExchange((PLONG)&(vacb)->ReferenceCount, 0, 0)
 #endif
+
+BOOLEAN
+CcRosFreeOneUnusedVacb(
+    VOID);

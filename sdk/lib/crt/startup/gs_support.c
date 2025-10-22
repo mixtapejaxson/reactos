@@ -3,7 +3,7 @@
  * This file is part of the w64 mingw-runtime package.
  * No warranty is given; refer to the file DISCLAIMER.PD within this package.
  */
-
+#define _NTSYSTEM_
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -29,7 +29,7 @@
 
 typedef LONG NTSTATUS;	/* same as in ntdef.h / winternl.h */
 
-#define UNW_FLAG_NHANDLER 0x00
+#define UNW_FLAG_NHANDLER 0x0
 
 typedef union
 {
@@ -116,7 +116,7 @@ __report_gsfailure (ULONG_PTR StackCookie)
 
   RtlCaptureContext (&GS_ContextRecord);
   controlPC = GS_ContextRecord.Rip;
-  fctEntry = RtlLookupFunctionEntry (controlPC, &imgBase, NULL);
+  fctEntry = RtlLookupFunctionEntry(controlPC, &imgBase, NULL);
   if (fctEntry != NULL)
     {
       RtlVirtualUnwind (UNW_FLAG_NHANDLER, imgBase, controlPC, fctEntry,

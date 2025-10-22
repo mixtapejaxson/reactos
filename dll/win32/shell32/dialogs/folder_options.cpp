@@ -83,119 +83,18 @@ HBITMAP BitmapFromIcon(HICON hIcon, INT cx, INT cy)
     return hbm;
 }
 
-HBITMAP CreateCheckImage(HDC hDC, BOOL bCheck, BOOL bEnabled)
-{
-    INT cxSmallIcon = GetSystemMetrics(SM_CXSMICON);
-    INT cySmallIcon = GetSystemMetrics(SM_CYSMICON);
-
-    HBITMAP hbm = Create24BppBitmap(hDC, cxSmallIcon, cySmallIcon);
-    if (hbm == NULL)
-        return NULL;    // failure
-
-    RECT Rect, BoxRect;
-    SetRect(&Rect, 0, 0, cxSmallIcon, cySmallIcon);
-    BoxRect = Rect;
-    InflateRect(&BoxRect, -1, -1);
-
-    HGDIOBJ hbmOld = SelectObject(hDC, hbm);
-    {
-        UINT uState = DFCS_BUTTONCHECK | DFCS_FLAT | DFCS_MONO;
-        if (bCheck)
-            uState |= DFCS_CHECKED;
-        if (!bEnabled)
-            uState |= DFCS_INACTIVE;
-        DrawFrameControl(hDC, &BoxRect, DFC_BUTTON, uState);
-    }
-    SelectObject(hDC, hbmOld);
-
-    return hbm;     // success
-}
-
-HBITMAP CreateCheckMask(HDC hDC)
-{
-    INT cxSmallIcon = GetSystemMetrics(SM_CXSMICON);
-    INT cySmallIcon = GetSystemMetrics(SM_CYSMICON);
-
-    HBITMAP hbm = CreateBitmap(cxSmallIcon, cySmallIcon, 1, 1, NULL);
-    if (hbm == NULL)
-        return NULL;    // failure
-
-    RECT Rect, BoxRect;
-    SetRect(&Rect, 0, 0, cxSmallIcon, cySmallIcon);
-    BoxRect = Rect;
-    InflateRect(&BoxRect, -1, -1);
-
-    HGDIOBJ hbmOld = SelectObject(hDC, hbm);
-    {
-        FillRect(hDC, &Rect, HBRUSH(GetStockObject(WHITE_BRUSH)));
-        FillRect(hDC, &BoxRect, HBRUSH(GetStockObject(BLACK_BRUSH)));
-    }
-    SelectObject(hDC, hbmOld);
-
-    return hbm;     // success
-}
-
-HBITMAP CreateRadioImage(HDC hDC, BOOL bCheck, BOOL bEnabled)
-{
-    INT cxSmallIcon = GetSystemMetrics(SM_CXSMICON);
-    INT cySmallIcon = GetSystemMetrics(SM_CYSMICON);
-
-    HBITMAP hbm = Create24BppBitmap(hDC, cxSmallIcon, cySmallIcon);
-    if (hbm == NULL)
-        return NULL;    // failure
-
-    RECT Rect, BoxRect;
-    SetRect(&Rect, 0, 0, cxSmallIcon, cySmallIcon);
-    BoxRect = Rect;
-    InflateRect(&BoxRect, -1, -1);
-
-    HGDIOBJ hbmOld = SelectObject(hDC, hbm);
-    {
-        UINT uState = DFCS_BUTTONRADIOIMAGE | DFCS_FLAT | DFCS_MONO;
-        if (bCheck)
-            uState |= DFCS_CHECKED;
-        if (!bEnabled)
-            uState |= DFCS_INACTIVE;
-        DrawFrameControl(hDC, &BoxRect, DFC_BUTTON, uState);
-    }
-    SelectObject(hDC, hbmOld);
-
-    return hbm;     // success
-}
-
-HBITMAP CreateRadioMask(HDC hDC)
-{
-    INT cxSmallIcon = GetSystemMetrics(SM_CXSMICON);
-    INT cySmallIcon = GetSystemMetrics(SM_CYSMICON);
-
-    HBITMAP hbm = CreateBitmap(cxSmallIcon, cySmallIcon, 1, 1, NULL);
-    if (hbm == NULL)
-        return NULL;    // failure
-
-    RECT Rect, BoxRect;
-    SetRect(&Rect, 0, 0, cxSmallIcon, cySmallIcon);
-    BoxRect = Rect;
-    InflateRect(&BoxRect, -1, -1);
-
-    HGDIOBJ hbmOld = SelectObject(hDC, hbm);
-    {
-        FillRect(hDC, &Rect, HBRUSH(GetStockObject(WHITE_BRUSH)));
-        UINT uState = DFCS_BUTTONRADIOMASK | DFCS_FLAT | DFCS_MONO;
-        DrawFrameControl(hDC, &BoxRect, DFC_BUTTON, uState);
-    }
-    SelectObject(hDC, hbmOld);
-
-    return hbm;     // success
-}
 
 /////////////////////////////////////////////////////////////////////////////
 
 // CMSGlobalFolderOptionsStub --- The owner window of Folder Options.
 // This window hides taskbar button of Folder Options.
+
+#define GlobalFolderOptionsClassName _T("MSGlobalFolderOptionsStub")
+
 class CMSGlobalFolderOptionsStub : public CWindowImpl<CMSGlobalFolderOptionsStub>
 {
 public:
-    DECLARE_WND_CLASS_EX(_T("MSGlobalFolderOptionsStub"), 0, COLOR_WINDOWTEXT)
+    DECLARE_WND_CLASS_EX(GlobalFolderOptionsClassName, 0, COLOR_WINDOWTEXT)
 
     BEGIN_MSG_MAP(CMSGlobalFolderOptionsStub)
     END_MSG_MAP()
@@ -222,14 +121,20 @@ PropSheetProc(HWND hwndDlg, UINT uMsg, LPARAM lParam)
     return 0;
 }
 
-static VOID
-ShowFolderOptionsDialog(HWND hWnd, HINSTANCE hInst)
+enum {
+    PAGE_GENERAL,
+    PAGE_VIEW,
+    PAGE_FILETYPES
+};
+
+static DWORD CALLBACK
+ShowFolderOptionsDialogThreadProc(LPVOID param)
 {
+    CCoInit com; // Required when started from rundll32 (IRegTreeOptions, SHAutoComplete (in PickIconDlg))
     PROPSHEETHEADERW pinfo;
     HPROPSHEETPAGE hppages[3];
     HPROPSHEETPAGE hpage;
     UINT num_pages = 0;
-    WCHAR szOptions[100];
 
     hpage = SH_CreatePropertySheetPage(IDD_FOLDER_OPTIONS_GENERAL, FolderOptionsGeneralDlg, 0, NULL);
     if (hpage)
@@ -243,10 +148,6 @@ ShowFolderOptionsDialog(HWND hWnd, HINSTANCE hInst)
     if (hpage)
         hppages[num_pages++] = hpage;
 
-    szOptions[0] = 0;
-    LoadStringW(shell32_hInstance, IDS_FOLDER_OPTIONS, szOptions, _countof(szOptions));
-    szOptions[_countof(szOptions) - 1] = 0;
-
     // the stub window to hide taskbar button
     DWORD style = WS_DISABLED | WS_CLIPSIBLINGS | WS_CAPTION;
     DWORD exstyle = WS_EX_WINDOWEDGE | WS_EX_TOOLWINDOW;
@@ -254,7 +155,7 @@ ShowFolderOptionsDialog(HWND hWnd, HINSTANCE hInst)
     if (!stub.Create(NULL, NULL, NULL, style, exstyle))
     {
         ERR("stub.Create failed\n");
-        return;
+        return 0;
     }
 
     memset(&pinfo, 0x0, sizeof(PROPSHEETHEADERW));
@@ -263,13 +164,38 @@ ShowFolderOptionsDialog(HWND hWnd, HINSTANCE hInst)
     pinfo.hwndParent = stub;
     pinfo.nPages = num_pages;
     pinfo.phpage = hppages;
+    pinfo.hInstance = shell32_hInstance;
     pinfo.pszIcon = MAKEINTRESOURCEW(IDI_SHELL_FOLDER_OPTIONS);
-    pinfo.pszCaption = szOptions;
+    pinfo.pszCaption = MAKEINTRESOURCEW(IDS_FOLDER_OPTIONS);
     pinfo.pfnCallback = PropSheetProc;
+    pinfo.nStartPage = PtrToUlong(param);
 
     PropertySheetW(&pinfo);
 
     stub.DestroyWindow();
+    return 0;
+}
+
+VOID WINAPI 
+ShowFolderOptionsDialog(UINT Page, BOOL Async = FALSE)
+{
+    HWND hWnd = FindWindow(GlobalFolderOptionsClassName, NULL);
+    if (hWnd)
+    {
+        HWND hPop = GetLastActivePopup(hWnd);
+        if (hWnd == GetParent(hPop))
+        {
+            PostMessage(hPop, PSM_SETCURSEL, Page, 0);
+        }
+        SetForegroundWindow(hPop);
+        return;
+    }
+    
+    LPVOID param = UlongToPtr(Page);
+    if (Async)
+        SHCreateThread(ShowFolderOptionsDialogThreadProc, param, 0, 0);
+    else
+        ShowFolderOptionsDialogThreadProc(param); // Rundll32 caller cannot be async!
 }
 
 static VOID
@@ -278,13 +204,20 @@ Options_RunDLLCommon(HWND hWnd, HINSTANCE hInst, int fOptions, DWORD nCmdShow)
     switch(fOptions)
     {
         case 0:
-            ShowFolderOptionsDialog(hWnd, hInst);
+            ShowFolderOptionsDialog(PAGE_GENERAL);
             break;
 
-        case 1:
-            // show taskbar options dialog
-            FIXME("notify explorer to show taskbar options dialog\n");
-            //PostMessage(GetShellWindow(), WM_USER+22, fOptions, 0);
+        case 1: // Taskbar settings
+#if (NTDDI_VERSION >= NTDDI_VISTA)
+        case 3: // Start menu settings
+        case 4: // Tray icon settings
+        case 6: // Taskbar toolbars
+#endif
+            PostMessage(GetShellWindow(), WM_PROGMAN_OPENSHELLSETTINGS, fOptions, 0);
+            break;
+
+        case 7: // Windows 8, 10
+            ShowFolderOptionsDialog(PAGE_VIEW);
             break;
 
         default:

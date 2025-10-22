@@ -20,6 +20,8 @@
 
 #include "precomp.h"
 #include <commoncontrols.h>
+#include <regstr.h>
+#include <shlwapi_undoc.h>
 
 /* Set DUMP_TASKS to 1 to enable a dump of the tasks and task groups every
    5 seconds */
@@ -28,6 +30,89 @@
 
 #define MAX_TASKS_COUNT (0x7FFF)
 #define TASK_ITEM_ARRAY_ALLOC   64
+
+//************************************************************************
+// Fullscreen windows (a.k.a. rude apps) checker
+
+#define TIMER_ID_VALIDATE_RUDE_APP 5
+#define VALIDATE_RUDE_INTERVAL 1000
+#define VALIDATE_RUDE_MAX_COUNT 5
+
+static BOOL
+SHELL_GetMonitorRect(
+    _In_opt_ HMONITOR hMonitor,
+    _Out_opt_ PRECT prcDest,
+    _In_ BOOL bWorkAreaOnly)
+{
+    MONITORINFO mi = { sizeof(mi) };
+    if (!hMonitor || !::GetMonitorInfoW(hMonitor, &mi))
+    {
+        if (!prcDest)
+            return FALSE;
+
+        if (bWorkAreaOnly)
+            ::SystemParametersInfoW(SPI_GETWORKAREA, 0, prcDest, 0);
+        else
+            ::SetRect(prcDest, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+
+        return FALSE;
+    }
+
+    if (prcDest)
+        *prcDest = (bWorkAreaOnly ? mi.rcWork : mi.rcMonitor);
+    return TRUE;
+}
+
+static BOOL
+SHELL_IsParentOwnerOrSelf(_In_ HWND hwndTarget, _In_ HWND hWnd)
+{
+    for (; hWnd; hWnd = ::GetParent(hWnd))
+    {
+        if (hWnd == hwndTarget)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL
+SHELL_IsRudeWindowActive(_In_ HWND hWnd)
+{
+    HWND hwndFore = ::GetForegroundWindow();
+    DWORD dwThreadId = ::GetWindowThreadProcessId(hWnd, NULL);
+    return dwThreadId == ::GetWindowThreadProcessId(hwndFore, NULL) ||
+           SHELL_IsParentOwnerOrSelf(hWnd, hwndFore);
+}
+
+static BOOL
+SHELL_IsRudeWindow(_In_opt_ HMONITOR hMonitor, _In_ HWND hWnd, _In_ BOOL bDontCheckActive)
+{
+    if (!::IsWindowVisible(hWnd) || hWnd == ::GetDesktopWindow())
+        return FALSE;
+
+    RECT rcMonitor;
+    SHELL_GetMonitorRect(hMonitor, &rcMonitor, FALSE);
+
+    DWORD style = ::GetWindowLongPtrW(hWnd, GWL_STYLE);
+
+    RECT rcWnd;
+    enum { CHECK_STYLE = WS_THICKFRAME | WS_DLGFRAME | WS_BORDER };
+    if ((style & CHECK_STYLE) == CHECK_STYLE)
+    {
+        ::GetClientRect(hWnd, &rcWnd); // Ignore frame
+        ::MapWindowPoints(hWnd, NULL, (PPOINT)&rcWnd, sizeof(RECT) / sizeof(POINT));
+    }
+    else
+    {
+        ::GetWindowRect(hWnd, &rcWnd);
+    }
+
+    RECT rcUnion;
+    ::UnionRect(&rcUnion, &rcWnd, &rcMonitor);
+
+    return ::EqualRect(&rcUnion, &rcWnd) && (bDontCheckActive || SHELL_IsRudeWindowActive(hWnd));
+}
+
+////////////////////////////////////////////////////////////////
 
 const WCHAR szTaskSwitchWndClass[] = L"MSTaskSwWClass";
 const WCHAR szRunningApps[] = L"Running Applications";
@@ -287,7 +372,6 @@ public:
 
         // HACK & FIXME: CORE-18016
         HWND toolbar = CToolbar::Create(hWndParent, styles);
-        SetDrawTextFlags(DT_NOPREFIX, DT_NOPREFIX);
         m_hWnd = NULL;
         return SubclassWindow(toolbar);
     }
@@ -321,6 +405,8 @@ class CTaskSwitchWnd :
     BOOL m_IsGroupingEnabled;
     BOOL m_IsDestroying;
 
+    INT m_nRudeAppValidationCounter;
+
     SIZE m_ButtonSize;
 
     UINT m_uHardErrorMsg;
@@ -339,7 +425,8 @@ public:
         m_ButtonCount(0),
         m_ImageList(NULL),
         m_IsGroupingEnabled(FALSE),
-        m_IsDestroying(FALSE)
+        m_IsDestroying(FALSE),
+        m_nRudeAppValidationCounter(0)
     {
         ZeroMemory(&m_ButtonSize, sizeof(m_ButtonSize));
         m_uHardErrorMsg = RegisterWindowMessageW(L"HardError");
@@ -490,10 +577,12 @@ public:
     HICON GetWndIcon(HWND hwnd)
     {
         HICON hIcon = NULL;
+
+        /* Retrieve icon by sending a message */
 #define GET_ICON(type) \
     SendMessageTimeout(hwnd, WM_GETICON, (type), 0, SMTO_NOTIMEOUTIFNOTHUNG, 100, (PDWORD_PTR)&hIcon)
 
-        LRESULT bAlive = GET_ICON(ICON_SMALL2);
+        LRESULT bAlive = GET_ICON(g_TaskbarSettings.bSmallIcons ? ICON_SMALL2 : ICON_BIG);
         if (hIcon)
             return hIcon;
 
@@ -506,17 +595,18 @@ public:
 
         if (bAlive)
         {
-            GET_ICON(ICON_BIG);
+            GET_ICON(g_TaskbarSettings.bSmallIcons ? ICON_BIG : ICON_SMALL2);
             if (hIcon)
                 return hIcon;
         }
 #undef GET_ICON
 
-        hIcon = (HICON)GetClassLongPtr(hwnd, GCLP_HICONSM);
+        /* If we failed, retrieve icon from the window class */
+        hIcon = (HICON)GetClassLongPtr(hwnd, g_TaskbarSettings.bSmallIcons ? GCLP_HICONSM : GCLP_HICON);
         if (hIcon)
             return hIcon;
 
-        return (HICON)GetClassLongPtr(hwnd, GCLP_HICON);
+        return (HICON)GetClassLongPtr(hwnd, g_TaskbarSettings.bSmallIcons ? GCLP_HICON : GCLP_HICONSM);
     }
 
     INT UpdateTaskItemButton(IN PTASK_ITEM TaskItem)
@@ -1131,7 +1221,6 @@ public:
         }
 
         CheckActivateTaskItem(TaskItem);
-
         return FALSE;
     }
 
@@ -1260,9 +1349,12 @@ public:
         /* Update the size of the image list if needed */
         int cx, cy;
         ImageList_GetIconSize(m_ImageList, &cx, &cy);
-        if (cx != GetSystemMetrics(SM_CXSMICON) || cy != GetSystemMetrics(SM_CYSMICON))
+        if (cx != GetSystemMetrics(g_TaskbarSettings.bSmallIcons ? SM_CXSMICON : SM_CXICON) ||
+            cy != GetSystemMetrics(g_TaskbarSettings.bSmallIcons ? SM_CYSMICON : SM_CYICON))
         {
-            ImageList_SetIconSize(m_ImageList, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+            ImageList_SetIconSize(m_ImageList,
+                                  GetSystemMetrics(g_TaskbarSettings.bSmallIcons ? SM_CXSMICON : SM_CXICON),
+                                  GetSystemMetrics(g_TaskbarSettings.bSmallIcons ? SM_CYSMICON : SM_CYICON));
 
             /* SetIconSize removes all icons so we have to reinsert them */
             PTASK_ITEM TaskItem = m_TaskItems;
@@ -1384,22 +1476,11 @@ public:
 
     BOOL CALLBACK EnumWindowsProc(IN HWND hWnd)
     {
-        /* Only show windows that still exist and are visible and none of explorer's
-        special windows (such as the desktop or the tray window) */
-        if (::IsWindow(hWnd) && ::IsWindowVisible(hWnd) &&
-            !m_Tray->IsSpecialHWND(hWnd))
+        if (m_Tray->IsTaskWnd(hWnd))
         {
-            DWORD exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
-            /* Don't list popup windows and also no tool windows */
-            if ((::GetWindow(hWnd, GW_OWNER) == NULL || exStyle & WS_EX_APPWINDOW) &&
-                !(exStyle & WS_EX_TOOLWINDOW))
-            {
-                TRACE("Adding task for %p...\n", hWnd);
-                AddTask(hWnd);
-            }
-
+            TRACE("Adding task for %p...\n", hWnd);
+            AddTask(hWnd);
         }
-
         return TRUE;
     }
 
@@ -1439,7 +1520,9 @@ public:
 
         SetWindowTheme(m_TaskBar.m_hWnd, L"TaskBand", NULL);
 
-        m_ImageList = ImageList_Create(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), ILC_COLOR32 | ILC_MASK, 0, 1000);
+        m_ImageList = ImageList_Create(GetSystemMetrics(g_TaskbarSettings.bSmallIcons ? SM_CXSMICON : SM_CXICON),
+                                       GetSystemMetrics(g_TaskbarSettings.bSmallIcons ? SM_CYSMICON : SM_CYICON),
+                                       ILC_COLOR32 | ILC_MASK, 0, 1000);
         m_TaskBar.SetImageList(m_ImageList);
 
         /* Set proper spacing between buttons */
@@ -1467,6 +1550,8 @@ public:
     {
         m_IsDestroying = TRUE;
 
+        KillTimer(TIMER_ID_VALIDATE_RUDE_APP);
+
         /* Unregister the shell hook */
         RegisterShellHook(m_hWnd, FALSE);
 
@@ -1475,25 +1560,60 @@ public:
         return TRUE;
     }
 
+    static BOOL InvokeRegistryAppKeyCommand(UINT uAppCmd)
+    {
+        BOOL bResult = FALSE;
+        WCHAR szBuf[MAX_PATH * 2];
+        wsprintfW(szBuf, L"%s\\AppKey\\%u", REGSTR_PATH_EXPLORER, uAppCmd);
+        HUSKEY hKey;
+        if (SHRegOpenUSKeyW(szBuf, KEY_READ, NULL, &hKey, FALSE) != ERROR_SUCCESS)
+            return bResult;
+
+        DWORD cb = sizeof(szBuf);
+        if (!bResult && SHRegQueryUSValueW(hKey, L"ShellExecute", NULL, szBuf, &cb, FALSE, NULL, 0) == ERROR_SUCCESS)
+        {
+            bResult = TRUE;
+        }
+        cb = sizeof(szBuf);
+        if (!bResult && SHRegQueryUSValueW(hKey, L"Association", NULL, szBuf, &cb, FALSE, NULL, 0) == ERROR_SUCCESS)
+        {
+            bResult = TRUE;
+            cb = _countof(szBuf);
+            if (AssocQueryString(ASSOCF_NOTRUNCATE, ASSOCSTR_EXECUTABLE, szBuf, NULL, szBuf, &cb) != S_OK)
+                *szBuf = UNICODE_NULL;
+        }
+        cb = sizeof(szBuf);
+        if (!bResult && SHRegQueryUSValueW(hKey, L"RegisteredApp", NULL, szBuf, &cb, FALSE, NULL, 0) == ERROR_SUCCESS)
+        {
+            bResult = TRUE;
+            SHRunIndirectRegClientCommand(NULL, szBuf);
+            *szBuf = UNICODE_NULL; // Don't execute again
+        }
+        SHRegCloseUSKey(hKey);
+
+        // Note: Tweak UI uses an empty string for its "Do nothing" option.
+        if (bResult && *szBuf)
+            ShellExec_RunDLLW(NULL, NULL, szBuf, SW_SHOW);
+        return bResult;
+    }
+
     BOOL HandleAppCommand(IN WPARAM wParam, IN LPARAM lParam)
     {
-        BOOL Ret = FALSE;
-
-        switch (GET_APPCOMMAND_LPARAM(lParam))
+        const UINT uAppCmd = GET_APPCOMMAND_LPARAM(lParam);
+        if (InvokeRegistryAppKeyCommand(uAppCmd))
+            return TRUE;
+        switch (uAppCmd)
         {
-        case APPCOMMAND_BROWSER_SEARCH:
-            Ret = SHFindFiles(NULL,
-                NULL);
-            break;
-
-        case APPCOMMAND_BROWSER_HOME:
-        case APPCOMMAND_LAUNCH_MAIL:
-        default:
-            TRACE("Shell app command %d unhandled!\n", (INT) GET_APPCOMMAND_LPARAM(lParam));
-            break;
+            case APPCOMMAND_VOLUME_MUTE:
+            case APPCOMMAND_VOLUME_DOWN:
+            case APPCOMMAND_VOLUME_UP:
+                // TODO: Try IMMDeviceEnumerator::GetDefaultAudioEndpoint first and then fall back to mixer.
+                FIXME("Call the mixer API to change the global volume\n");
+                return TRUE;
+            case APPCOMMAND_BROWSER_SEARCH:
+                return SHFindFiles(NULL, NULL);
         }
-
-        return Ret;
+        return FALSE;
     }
 
     LRESULT OnShellHook(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
@@ -1512,7 +1632,7 @@ public:
         switch ((INT) wParam)
         {
         case HSHELL_APPCOMMAND:
-            Ret = HandleAppCommand(wParam, lParam);
+            Ret = HandleAppCommand(0, lParam);
             break;
 
         case HSHELL_WINDOWCREATED:
@@ -1521,12 +1641,14 @@ public:
 
         case HSHELL_WINDOWDESTROYED:
             /* The window still exists! Delay destroying it a bit */
-            DeleteTask((HWND) lParam);
+            OnWindowDestroyed((HWND)lParam);
+            DeleteTask((HWND)lParam);
             break;
 
         case HSHELL_RUDEAPPACTIVATED:
         case HSHELL_WINDOWACTIVATED:
-            ActivateTask((HWND) lParam);
+            OnWindowActivated((HWND)lParam);
+            ActivateTask((HWND)lParam);
             break;
 
         case HSHELL_FLASH:
@@ -1597,12 +1719,14 @@ public:
 
             if (!bIsMinimized && bIsActive)
             {
-                ::ShowWindowAsync(TaskItem->hWnd, SW_MINIMIZE);
+                if (!::IsHungAppWindow(TaskItem->hWnd))
+                    ::ShowWindowAsync(TaskItem->hWnd, SW_MINIMIZE);
                 TRACE("Valid button clicked. App window Minimized.\n");
             }
             else
             {
                 ::SwitchToThisWindow(TaskItem->hWnd, TRUE);
+
                 TRACE("Valid button clicked. App window Restored.\n");
             }
         }
@@ -1766,6 +1890,130 @@ public:
         return Ret;
     }
 
+    // Internal structure for IsRudeEnumProc
+    typedef struct tagRUDEAPPDATA
+    {
+        HMONITOR hTargetMonitor;
+        HWND hwndFound;
+        HWND hwndFirstCheck;
+    } RUDEAPPDATA, *PRUDEAPPDATA;
+
+    // Find any rude app
+    static BOOL CALLBACK
+    IsRudeEnumProc(_In_ HWND hwnd, _In_ LPARAM lParam)
+    {
+        PRUDEAPPDATA pData = (PRUDEAPPDATA)lParam;
+
+        HMONITOR hMon = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (!hMon ||
+            (pData->hTargetMonitor && pData->hTargetMonitor != hMon) ||
+            !SHELL_IsRudeWindow(hMon, hwnd, (hwnd == pData->hwndFirstCheck)))
+        {
+            return TRUE; // Continue
+        }
+
+        pData->hwndFound = hwnd;
+        return FALSE; // Finish
+    }
+
+    // Internal structure for FullScreenEnumProc
+    typedef struct tagFULLSCREENDATA
+    {
+        const RECT *pRect;
+        HMONITOR hTargetMonitor;
+        ITrayWindow *pTray;
+    } FULLSCREENDATA, *PFULLSCREENDATA;
+
+    // Notify ABN_FULLSCREENAPP for each monitor
+    static BOOL CALLBACK
+    FullScreenEnumProc(_In_ HMONITOR hMonitor, _In_opt_ HDC hDC, _In_ LPRECT prc, _In_ LPARAM lParam)
+    {
+        PFULLSCREENDATA pData = (PFULLSCREENDATA)lParam;
+
+        BOOL bFullOpening = (pData->hTargetMonitor == hMonitor);
+        if (!bFullOpening && pData->pRect)
+        {
+            RECT rc, rcMon;
+            SHELL_GetMonitorRect(hMonitor, &rcMon, FALSE);
+            ::IntersectRect(&rc, &rcMon, pData->pRect);
+            bFullOpening = ::EqualRect(&rc, &rcMon);
+        }
+
+        // Notify ABN_FULLSCREENAPP to appbars
+        pData->pTray->NotifyFullScreenToAppBars(hMonitor, bFullOpening);
+        return TRUE;
+    }
+
+    void HandleFullScreenApp(_In_opt_ HWND hwndRude)
+    {
+        // Notify ABN_FULLSCREENAPP for every monitor
+        RECT rc;
+        FULLSCREENDATA Data = { NULL, NULL, NULL };
+        if (hwndRude && ::GetWindowRect(hwndRude, &rc))
+        {
+            Data.pRect = &rc;
+            Data.hTargetMonitor = ::MonitorFromWindow(hwndRude, MONITOR_DEFAULTTONULL);
+        }
+        Data.pTray = m_Tray;
+        ::EnumDisplayMonitors(NULL, NULL, FullScreenEnumProc, (LPARAM)&Data);
+
+        if (hwndRude)
+        {
+            // Make the taskbar bottom
+            UINT uFlags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+            HWND hwndTray = m_Tray->GetHWND();
+            ::SetWindowPos(hwndTray, HWND_BOTTOM, 0, 0, 0, 0, uFlags);
+
+            // Switch to the rude app if necessary
+            DWORD exstyle = (DWORD)::GetWindowLongPtrW(hwndRude, GWL_EXSTYLE);
+            if (!(exstyle & WS_EX_TOPMOST) && !SHELL_IsRudeWindowActive(hwndRude))
+                ::SwitchToThisWindow(hwndRude, TRUE);
+        }
+    }
+
+    HWND FindRudeApp(_In_opt_ HWND hwndFirstCheck)
+    {
+        // Quick check
+        HMONITOR hMon = MonitorFromWindow(hwndFirstCheck, MONITOR_DEFAULTTONEAREST);
+        RUDEAPPDATA data = { hMon, NULL, hwndFirstCheck };
+        if (::IsWindow(hwndFirstCheck) && !IsRudeEnumProc(hwndFirstCheck, (LPARAM)&data))
+            return hwndFirstCheck;
+
+        // Slow check
+        ::EnumWindows(IsRudeEnumProc, (LPARAM)&data);
+
+        return data.hwndFound;
+    }
+
+    // WM_WINDOWPOSCHANGED
+    LRESULT OnWindowPosChanged(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
+    {
+        // Re-start rude app validation
+        KillTimer(TIMER_ID_VALIDATE_RUDE_APP);
+        SetTimer(TIMER_ID_VALIDATE_RUDE_APP, VALIDATE_RUDE_INTERVAL, NULL);
+        m_nRudeAppValidationCounter = 0;
+        bHandled = FALSE;
+        return 0;
+    }
+
+    // HSHELL_WINDOWACTIVATED, HSHELL_RUDEAPPACTIVATED
+    void OnWindowActivated(_In_ HWND hwndTarget)
+    {
+        // Re-start rude app validation
+        KillTimer(TIMER_ID_VALIDATE_RUDE_APP);
+        SetTimer(TIMER_ID_VALIDATE_RUDE_APP, VALIDATE_RUDE_INTERVAL, NULL);
+        m_nRudeAppValidationCounter = 0;
+    }
+
+    // HSHELL_WINDOWDESTROYED
+    void OnWindowDestroyed(_In_ HWND hwndTarget)
+    {
+        if (!FindTaskItem(hwndTarget))
+            return;
+        HWND hwndRude = FindRudeApp(hwndTarget);
+        HandleFullScreenApp(hwndRude);
+    }
+
     LRESULT OnEraseBackground(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
     {
         HDC hdc = (HDC) wParam;
@@ -1840,13 +2088,25 @@ public:
 
     LRESULT OnTaskbarSettingsChanged(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
     {
+        BOOL bSettingsChanged = FALSE;
         TaskbarSettings* newSettings = (TaskbarSettings*)lParam;
+
         if (newSettings->bGroupButtons != g_TaskbarSettings.bGroupButtons)
         {
+            bSettingsChanged = TRUE;
             g_TaskbarSettings.bGroupButtons = newSettings->bGroupButtons;
             m_IsGroupingEnabled = g_TaskbarSettings.bGroupButtons;
+        }
 
-            /* Collapse or expand groups if necessary */
+        if (newSettings->bSmallIcons != g_TaskbarSettings.bSmallIcons)
+        {
+            bSettingsChanged = TRUE;
+            g_TaskbarSettings.bSmallIcons = newSettings->bSmallIcons;
+        }
+
+        if (bSettingsChanged)
+        {
+            /* Refresh each task item view */
             RefreshWindowList();
             UpdateButtonsSize(FALSE);
         }
@@ -1907,14 +2167,32 @@ public:
 
     LRESULT OnTimer(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
     {
-#if DUMP_TASKS != 0
         switch (wParam)
         {
-        case 1:
-            DumpTasks();
-            break;
-        }
+#if DUMP_TASKS != 0
+            case 1:
+                DumpTasks();
+                break;
 #endif
+            case TIMER_ID_VALIDATE_RUDE_APP:
+            {
+                // Real activation of rude app might take some time after HSHELL_...ACTIVATED.
+                // Wait up to 5 seconds with validating the rude app at each second.
+                HWND hwndRude = FindRudeApp(NULL);
+                HandleFullScreenApp(hwndRude);
+
+                KillTimer(wParam);
+                ++m_nRudeAppValidationCounter;
+                if (m_nRudeAppValidationCounter < VALIDATE_RUDE_MAX_COUNT && !hwndRude)
+                    SetTimer(wParam, VALIDATE_RUDE_INTERVAL, NULL);
+                break;
+            }
+            default:
+            {
+                WARN("Unknown timer ID: %p\n", wParam);
+                break;
+            }
+        }
         return TRUE;
     }
 
@@ -1960,7 +2238,10 @@ public:
         return S_OK;
     }
 
-    HRESULT WINAPI GetWindow(HWND* phwnd)
+    // *** IOleWindow methods ***
+
+    STDMETHODIMP
+    GetWindow(HWND* phwnd) override
     {
         if (!phwnd)
             return E_INVALIDARG;
@@ -1968,7 +2249,8 @@ public:
         return S_OK;
     }
 
-    HRESULT WINAPI ContextSensitiveHelp(BOOL fEnterMode)
+    STDMETHODIMP
+    ContextSensitiveHelp(BOOL fEnterMode) override
     {
         return E_NOTIMPL;
     }
@@ -1994,6 +2276,7 @@ public:
         MESSAGE_HANDLER(WM_MOUSEACTIVATE, OnMouseActivate)
         MESSAGE_HANDLER(WM_KLUDGEMINRECT, OnKludgeItemRect)
         MESSAGE_HANDLER(WM_COPYDATA, OnCopyData)
+        MESSAGE_HANDLER(WM_WINDOWPOSCHANGED, OnWindowPosChanged)
     END_MSG_MAP()
 
     DECLARE_NOT_AGGREGATABLE(CTaskSwitchWnd)

@@ -414,7 +414,7 @@ BOOL WINAPI SdbGUIDToString(CONST GUID *Guid, PWSTR GuidString, SIZE_T Length)
     UNICODE_STRING GuidString_u;
     if (NT_SUCCESS(RtlStringFromGUID(Guid, &GuidString_u)))
     {
-        HRESULT hr = StringCchCopyNW(GuidString, Length, GuidString_u.Buffer, GuidString_u.Length / 2);
+        HRESULT hr = StringCchCopyNW(GuidString, Length, GuidString_u.Buffer, GuidString_u.Length / sizeof(WCHAR));
         RtlFreeUnicodeString(&GuidString_u);
         return SUCCEEDED(hr);
     }
@@ -501,7 +501,9 @@ BOOL WINAPI SdbGetDatabaseVersion(LPCWSTR database, PDWORD VersionHi, PDWORD Ver
  */
 BOOL WINAPI SdbGetDatabaseInformation(PDB pdb, PDB_INFORMATION information)
 {
-    if (pdb && information)
+    RtlZeroMemory(information, sizeof(*information));
+
+    if (pdb)
     {
         information->dwFlags = 0;
         information->dwMajor = pdb->major;
@@ -519,16 +521,33 @@ BOOL WINAPI SdbGetDatabaseInformation(PDB pdb, PDB_INFORMATION information)
 }
 
 /**
- * @name SdbFreeDatabaseInformation
- * Free up resources allocated in SdbGetDatabaseInformation
+ * @unimplemented
+ * @name SdbGetDatabaseInformationByName
+ * Get information about the database
  *
- * @param information   The information retrieved from SdbGetDatabaseInformation
+ * @param lpwszFileName The database file
+ * @param ppAttrInfo    The returned information, allocated by this function
+ * @return TRUE on success
  */
-VOID WINAPI SdbFreeDatabaseInformation(PDB_INFORMATION information)
+BOOL WINAPI
+SdbGetDatabaseInformationByName(_In_ LPCTSTR lpwszFileName, _Outptr_ PDB_INFORMATION *ppAttrInfo)
 {
-    // No-op
+    SHIM_ERR("Unimplemented\n");
+    *ppAttrInfo = NULL;
+    return FALSE;
 }
 
+/**
+  * @unimplemented
+  * @name SdbFreeDatabaseInformation
+  * Free up resources allocated in SdbGetDatabaseInformationByName
+  *
+  * @param information   The information retrieved from SdbGetDatabaseInformationByName
+  */
+VOID WINAPI SdbFreeDatabaseInformation(_In_opt_ PDB_INFORMATION information)
+{
+    SHIM_ERR("Unimplemented\n");
+}
 
 /**
  * Find the first named child tag.
@@ -553,7 +572,7 @@ TAGID WINAPI SdbFindFirstNamedTag(PDB pdb, TAGID root, TAGID find, TAGID nametag
         if (tmp != TAGID_NULL)
         {
             LPCWSTR name = SdbGetStringTagPtr(pdb, tmp);
-            if (name && !wcsicmp(name, find_name))
+            if (name && !_wcsicmp(name, find_name))
                 return iter;
         }
         iter = SdbFindNextTag(pdb, root, iter);

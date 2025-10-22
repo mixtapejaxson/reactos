@@ -6,8 +6,7 @@
  * PROGRAMMERS:     ReactOS Portable Systems Group
  */
 
-#ifdef _M_ARM
-
+#if 0
 #include <freeldr.h>
 
 /* GLOBALS ********************************************************************/
@@ -36,7 +35,7 @@ UiInitialize(IN BOOLEAN ShowUi)
     MachVideoGetDisplaySize(&UiScreenWidth, &UiScreenHeight, &Depth);
 
     /* Clear the screen */
-    UiDrawBackdrop();
+    UiDrawBackdrop(UiGetScreenHeight());
     return TRUE;
 }
 
@@ -48,7 +47,7 @@ UiUnInitialize(IN PCSTR BootText)
 }
 
 VOID
-UiDrawBackdrop(VOID)
+UiDrawBackdrop(ULONG DrawHeight)
 {
     /* Clear the screen */
     MachVideoClearScreen(ATTR(COLOR_WHITE, COLOR_BLACK));
@@ -94,19 +93,22 @@ UiDrawStatusText(IN PCSTR StatusText)
 }
 
 VOID
-UiInfoBox(IN PCSTR MessageText)
+UiInfoBox(
+    _In_ PCSTR MessageText)
 {
     TuiPrintf(MessageText);
 }
 
 VOID
-UiMessageBox(IN PCSTR MessageText)
+UiMessageBox(
+    _In_ PCSTR MessageText)
 {
     TuiPrintf(MessageText);
 }
 
 VOID
-UiMessageBoxCritical(IN PCSTR MessageText)
+UiMessageBoxCritical(
+    _In_ PCSTR MessageText)
 {
     TuiPrintf(MessageText);
 }
@@ -137,7 +139,6 @@ BOOLEAN
 UiDisplayMenu(
     IN PCSTR MenuHeader,
     IN PCSTR MenuFooter OPTIONAL,
-    IN BOOLEAN ShowBootOptions,
     IN PCSTR MenuItemList[],
     IN ULONG MenuItemCount,
     IN ULONG DefaultMenuItem,

@@ -47,9 +47,6 @@ typedef struct _ATTACHINFO
 
 extern PATTACHINFO gpai;
 
-/* Keyboard layout undocumented flags */
-#define KLF_UNLOAD 0x20000000
-
 /* Key States */
 #define KS_DOWN_BIT      0x80
 #define KS_LOCK_BIT      0x01
@@ -75,8 +72,10 @@ VOID NTAPI UserProcessKeyboardInput(PKEYBOARD_INPUT_DATA pKeyInput);
 BOOL NTAPI UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected);
 PKL NTAPI UserHklToKbl(HKL hKl);
 BOOL NTAPI UserSetDefaultInputLang(HKL hKl);
-extern int gLanguageToggleKeyState;
+extern INT gLanguageToggleKeyState;
 extern DWORD gdwLanguageToggleKey;
+extern INT gLayoutToggleKeyState;
+extern DWORD gdwLayoutToggleKey;
 
 /* Mouse */
 WORD FASTCALL UserGetMouseButtonsState(VOID);
@@ -84,7 +83,12 @@ VOID NTAPI UserProcessMouseInput(PMOUSE_INPUT_DATA pMouseInputData);
 BOOL NTAPI UserSendMouseInput(MOUSEINPUT *pMouseInput, BOOL bInjected);
 
 /* IMM */
-UINT FASTCALL IntImmProcessKey(PUSER_MESSAGE_QUEUE, PWND, UINT, WPARAM, LPARAM);
+UINT FASTCALL IntImmProcessKey(
+    _In_ PUSER_MESSAGE_QUEUE MessageQueue,
+    _In_ PWND pWnd,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam);
 VOID FASTCALL IntFreeImeHotKeys(VOID);
 
 extern DWORD gSystemFS;

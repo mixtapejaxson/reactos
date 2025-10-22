@@ -223,10 +223,6 @@ PathQualifyExW(_Inout_ LPWSTR pszPath, _Inout_opt_ LPCWSTR pszDir, _In_ DWORD dw
             PWCHAR pch;
             for (pch = pchTemp; *pch != UNICODE_NULL; ++pch)
             {
-#define PATH_CHAR_CLASS_DOT         0x00000004
-#define PATH_CHAR_CLASS_BACKSLASH   0x00000008
-#define PATH_CHAR_CLASS_COLON       0x00000010
-#define PATH_CHAR_CLASS_OTHER_VALID 0x00000100
 #define VALID_SHORT_PATH_CHAR_CLASSES ( \
     PATH_CHAR_CLASS_DOT | \
     PATH_CHAR_CLASS_BACKSLASH | \
@@ -616,8 +612,6 @@ BOOL WINAPI IsLFNDriveW(LPCWSTR lpszPath)
     }
     else
     {
-        assert(!PathIsRelativeW(lpszPath)); /* Assuming absolute path... */
-
         iDrive = ((lpszPath[0] - L'A') & 0x1F);
         PathBuildRootW(szRoot, iDrive);
 
@@ -671,6 +665,154 @@ static BOOL PathMakeUniqueNameA(
 /*************************************************************************
  * PathMakeUniqueNameW	[internal]
  */
+#ifdef __REACTOS__
+/* https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-pathmakeuniquename */
+static BOOL PathMakeUniqueNameW(
+    _Out_ PWSTR pszUniqueName,
+    _In_ UINT cchMax,
+    _In_ PCWSTR pszTemplate,
+    _In_opt_ PCWSTR pszLongPlate, /* Long template */
+    _In_opt_ PCWSTR pszDir)
+{
+    TRACE("%p %u %s %s %s\n",
+          pszUniqueName, cchMax, debugstr_w(pszTemplate),
+          debugstr_w(pszLongPlate), debugstr_w(pszDir));
+
+    if (!cchMax || !pszUniqueName)
+        return FALSE;
+
+    pszUniqueName[0] = UNICODE_NULL;
+
+    PWSTR pszDest = pszUniqueName;
+    UINT dirLength = 0;
+    if (pszDir)
+    {
+        if (StringCchCopyW(pszUniqueName, cchMax - 1, pszDir) != S_OK)
+            return FALSE;
+
+        pszDest = PathAddBackslashW(pszUniqueName);
+        if (!pszDest)
+            return FALSE;
+
+        dirLength = lstrlenW(pszDir);
+    }
+
+    PCWSTR pszTitle = pszLongPlate ? pszLongPlate : pszTemplate;
+    PCWSTR pchDotExt, formatString = L"%d";
+    INT maxCount, cchTitle;
+
+    if (   !pszTitle
+        || !IsLFNDriveW(pszDir)
+#if (NTDDI_VERSION < NTDDI_VISTA)
+        || pszDir
+#endif
+    )
+    {
+        if (!pszTemplate)
+            return FALSE;
+
+        pchDotExt = PathFindExtensionW(pszTemplate);
+
+        cchTitle = pchDotExt - pszTemplate;
+        if (cchTitle > 1)
+        {
+            PCWSTR pch = pchDotExt - 1;
+            while (cchTitle > 1 && (L'0' <= *pch && *pch <= L'9'))
+            {
+                --cchTitle;
+                --pch;
+            }
+        }
+
+#define MSDOS_8DOT3_FILENAME_TITLE_LEN 8
+        if (cchTitle > MSDOS_8DOT3_FILENAME_TITLE_LEN - 1)
+            cchTitle = MSDOS_8DOT3_FILENAME_TITLE_LEN - 1;
+
+        INT extLength = lstrlenW(pchDotExt);
+        while (cchTitle > 1 && (dirLength + cchTitle + extLength + 1 > (cchMax - 1)))
+            --cchTitle;
+
+        if (cchTitle <= 0)
+            maxCount = 1;
+        else if (cchTitle == 1)
+            maxCount = 10;
+        else
+            maxCount = 100;
+
+        pszTitle = pszTemplate;
+    }
+    else
+    {
+        PCWSTR openParen = StrChrW(pszTitle, L'(');
+        if (openParen)
+        {
+            while (openParen)
+            {
+                PCWSTR pch = openParen + 1;
+                while (*pch >= L'0' && *pch <= L'9')
+                    ++pch;
+
+                if (*pch == L')')
+                    break;
+
+                openParen = StrChrW(openParen + 1, L'(');
+            }
+
+            if (openParen)
+            {
+                pchDotExt = openParen + 1;
+                cchTitle = pchDotExt - pszTitle;
+            }
+            else
+            {
+                pchDotExt = PathFindExtensionW(pszTitle);
+                cchTitle = pchDotExt - pszTitle;
+                formatString = L" (%d)";
+            }
+        }
+        else
+        {
+            pchDotExt = PathFindExtensionW(pszTitle);
+            cchTitle = pchDotExt - pszTitle;
+            formatString = L" (%d)";
+        }
+
+        INT remainingChars = cchMax - (dirLength + cchTitle + (lstrlenW(formatString) - 2));
+        if (remainingChars <= 0)
+            maxCount = 1;
+        else if (remainingChars == 1)
+            maxCount = 10;
+        else if (remainingChars == 2)
+            maxCount = 100;
+        else
+            maxCount = 1000;
+    }
+
+    if (StringCchCopyNW(pszDest, cchMax - dirLength, pszTitle, cchTitle) != S_OK)
+        return FALSE;
+
+    PWSTR pchTitle = pszDest + cchTitle;
+    INT count;
+    for (count = 1; count < maxCount; ++count)
+    {
+        WCHAR tempName[MAX_PATH];
+        if (StringCchPrintfW(tempName, _countof(tempName), formatString, count) != S_OK ||
+            StringCchCatW(tempName, _countof(tempName), pchDotExt) != S_OK)
+        {
+            return FALSE;
+        }
+
+        if (StringCchCopyW(pchTitle, cchMax - (pchTitle - pszUniqueName), tempName) != S_OK)
+            return FALSE;
+
+        if (!PathFileExistsW(pszUniqueName))
+            return TRUE;
+    }
+
+    pszUniqueName[0] = UNICODE_NULL;
+    return FALSE;
+}
+#else
 static BOOL PathMakeUniqueNameW(
 	LPWSTR lpszBuffer,
 	DWORD dwBuffSize,
@@ -683,6 +825,7 @@ static BOOL PathMakeUniqueNameW(
 	 debugstr_w(lpszLongName), debugstr_w(lpszPathName));
 	return TRUE;
 }
+#endif
 
 /*************************************************************************
  * PathMakeUniqueName	[SHELL32.47]
@@ -987,6 +1130,7 @@ static LONG PathProcessCommandA (
 	return strlen(lpszPath);
 }
 
+#ifndef __REACTOS__ // See ../shlexec.cpp
 /*************************************************************************
 *	PathProcessCommandW
 */
@@ -1002,6 +1146,7 @@ static LONG PathProcessCommandW (
 	if(lpszBuff) strcpyW(lpszBuff, lpszPath);
 	return strlenW(lpszPath);
 }
+#endif
 
 /*************************************************************************
 *	PathProcessCommand (SHELL32.653)
@@ -1084,11 +1229,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         CSIDL_Type_User,
         L"Desktop",
         MAKEINTRESOURCEW(IDS_DESKTOPDIRECTORY),
-#ifdef __REACTOS__
         0
-#else
-        -IDI_SHELL_DESKTOP
-#endif
     },
     { /* 0x01 - CSIDL_INTERNET */
         &FOLDERID_InternetFolder,
@@ -1101,23 +1242,19 @@ static const CSIDL_DATA CSIDL_Data[] =
         CSIDL_Type_User,
         L"Programs",
         MAKEINTRESOURCEW(IDS_PROGRAMS),
-#ifdef __REACTOS__
         0
-#else
-        -IDI_SHELL_PROGRAMS_FOLDER
-#endif
     },
     { /* 0x03 - CSIDL_CONTROLS (.CPL files) */
         &FOLDERID_ControlPanelFolder,
         CSIDL_Type_SystemPath,
-        NULL,
+        L"ControlPanelFolder",
         NULL,
         -IDI_SHELL_CONTROL_PANEL
     },
     { /* 0x04 - CSIDL_PRINTERS */
         &FOLDERID_PrintersFolder,
         CSIDL_Type_SystemPath,
-        NULL,
+        L"PrintersFolder",
         NULL,
         -IDI_SHELL_PRINTERS_FOLDER
     },
@@ -1157,7 +1294,7 @@ static const CSIDL_DATA CSIDL_Data[] =
     { /* 0x0a - CSIDL_BITBUCKET - Recycle Bin */
         &FOLDERID_RecycleBinFolder,
         CSIDL_Type_Disallowed,
-        NULL,
+        L"RecycleBinFolder",
         NULL
     },
     { /* 0x0b - CSIDL_STARTMENU */
@@ -1207,23 +1344,19 @@ static const CSIDL_DATA CSIDL_Data[] =
         CSIDL_Type_User,
         L"Desktop",
         MAKEINTRESOURCEW(IDS_DESKTOPDIRECTORY),
-#ifdef __REACTOS__
         0
-#else
-        -IDI_SHELL_DESKTOP
-#endif
     },
     { /* 0x11 - CSIDL_DRIVES */
         &FOLDERID_ComputerFolder,
         CSIDL_Type_Disallowed,
-        NULL,
+        L"MyComputerFolder",
         NULL,
         -IDI_SHELL_COMPUTER_FOLDER
     },
     { /* 0x12 - CSIDL_NETWORK */
         &FOLDERID_NetworkFolder,
         CSIDL_Type_Disallowed,
-        NULL,
+        L"NetworkPlacesFolder",
         NULL,
         -IDI_SHELL_NETWORK_FOLDER
     },
@@ -1259,11 +1392,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         CSIDL_Type_AllUsers,
         L"Common Programs",
         MAKEINTRESOURCEW(IDS_PROGRAMS),
-#ifdef __REACTOS__
         0
-#else
-        -IDI_SHELL_PROGRAMS_FOLDER
-#endif
     },
     { /* 0x18 - CSIDL_COMMON_STARTUP */
         &FOLDERID_CommonStartup,
@@ -1276,11 +1405,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         CSIDL_Type_AllUsers,
         L"Common Desktop",
         MAKEINTRESOURCEW(IDS_DESKTOPDIRECTORY),
-#ifdef __REACTOS__
         0
-#else
-        -IDI_SHELL_DESKTOP
-#endif
     },
     { /* 0x1a - CSIDL_APPDATA */
         &FOLDERID_RoamingAppData,
@@ -1347,27 +1472,23 @@ static const CSIDL_DATA CSIDL_Data[] =
     { /* 0x24 - CSIDL_WINDOWS */
         &FOLDERID_Windows,
         CSIDL_Type_WindowsPath,
+        L"Windows",
         NULL,
-        NULL,
-        -IDI_SHELL_SYSTEM_GEAR
+        0
     },
     { /* 0x25 - CSIDL_SYSTEM */
         &FOLDERID_System,
         CSIDL_Type_SystemPath,
+        L"System",
         NULL,
-        NULL,
-        -IDI_SHELL_SYSTEM_GEAR
+        0
     },
     { /* 0x26 - CSIDL_PROGRAM_FILES */
         &FOLDERID_ProgramFiles,
         CSIDL_Type_CurrVer,
-        L"ProgramFilesDir",
+        L"ProgramFiles",
         MAKEINTRESOURCEW(IDS_PROGRAM_FILES),
-#ifdef __REACTOS__
         0
-#else
-        -IDI_SHELL_PROGRAMS_FOLDER
-#endif
     },
     { /* 0x27 - CSIDL_MYPICTURES */
         &FOLDERID_Pictures,
@@ -1396,23 +1517,23 @@ static const CSIDL_DATA CSIDL_Data[] =
     { /* 0x2a - CSIDL_PROGRAM_FILESX86 */
         &FOLDERID_ProgramFilesX86,
         CSIDL_Type_CurrVer,
-        L"ProgramFilesDir (x86)",
+        L"ProgramFilesX86",
         L"Program Files (x86)",
-        -IDI_SHELL_PROGRAMS_FOLDER
+        0
     },
     { /* 0x2b - CSIDL_PROGRAM_FILES_COMMON */
         &FOLDERID_ProgramFilesCommon,
         CSIDL_Type_CurrVer,
-        L"CommonFilesDir",
+        L"ProgramFilesCommon",
         MAKEINTRESOURCEW(IDS_PROGRAM_FILES_COMMON),
-        -IDI_SHELL_PROGRAMS_FOLDER
+        0
     },
     { /* 0x2c - CSIDL_PROGRAM_FILES_COMMONX86 */
         &FOLDERID_ProgramFilesCommonX86,
         CSIDL_Type_CurrVer,
-        L"CommonFilesDir (x86)",
+        L"ProgramFilesCommonX86",
         L"Program Files (x86)\\Common Files",
-        -IDI_SHELL_PROGRAMS_FOLDER
+        0
     },
     { /* 0x2d - CSIDL_COMMON_TEMPLATES */
         &FOLDERID_CommonTemplates,
@@ -1442,7 +1563,7 @@ static const CSIDL_DATA CSIDL_Data[] =
     { /* 0x31 - CSIDL_CONNECTIONS */
         &FOLDERID_ConnectionsFolder,
         CSIDL_Type_Disallowed,
-        NULL,
+        L"ConnectionsFolder",
         NULL,
         -IDI_SHELL_NETWORK_CONNECTIONS
     },
@@ -1847,6 +1968,43 @@ static const CSIDL_DATA CSIDL_Data[] =
     }
 #endif
 };
+
+INT SHGetSpecialFolderID(_In_ LPCWSTR pszName)
+{
+    UINT csidl;
+
+    for (csidl = 0; csidl < _countof(CSIDL_Data); ++csidl)
+    {
+        const CSIDL_DATA *pData = &CSIDL_Data[csidl];
+        if (pData->szValueName && lstrcmpiW(pszName, pData->szValueName) == 0)
+            return csidl;
+    }
+
+    return -1;
+}
+
+INT Shell_ParseSpecialFolder(_In_ LPCWSTR pszStart, _Out_ LPWSTR *ppch, _Out_ INT *pcch)
+{
+    LPCWSTR pszPath, pchBackslash;
+    WCHAR szPath[MAX_PATH];
+
+    pchBackslash = StrChrW(pszStart, L'\\');
+    if (pchBackslash)
+    {
+        *ppch = (LPWSTR)(pchBackslash + 1);
+        *pcch = (pchBackslash - pszStart) + 1;
+        StrCpyNW(szPath, pszStart, min(*pcch, _countof(szPath)));
+        pszPath = szPath;
+    }
+    else
+    {
+        *ppch = NULL;
+        *pcch = lstrlenW(pszStart);
+        pszPath = pszStart;
+    }
+
+    return SHGetSpecialFolderID(pszPath);
+}
 
 #ifndef __REACTOS__
 static HRESULT _SHExpandEnvironmentStrings(LPCWSTR szSrc, LPWSTR szDest);
@@ -3068,6 +3226,32 @@ BOOL WINAPI SHGetSpecialFolderPathW (
                             szPath) == S_OK;
 }
 
+#ifdef __REACTOS__
+HRESULT SHGetFolderLocationHelper(HWND hwnd, int nFolder, REFCLSID clsid, LPITEMIDLIST *ppidl)
+{
+    HRESULT hr;
+    IShellFolder *psf;
+    LPITEMIDLIST parent, child;
+    EXTERN_C HRESULT SHBindToObject(IShellFolder *psf, LPCITEMIDLIST pidl, REFIID riid, void **ppvObj);
+    *ppidl = NULL;
+    if (FAILED(hr = SHGetFolderLocation(hwnd, nFolder, NULL, 0, &parent)))
+        return hr;
+    if (SUCCEEDED(hr = SHBindToObject(NULL, parent, &IID_IShellFolder, (void**)&psf)))
+    {
+        WCHAR clsidstr[2 + 38 + 1];
+        clsidstr[0] = clsidstr[1] = L':';
+        StringFromGUID2(clsid, clsidstr + 2, 38 + 1);
+        hr = IShellFolder_ParseDisplayName(psf, hwnd, NULL, clsidstr, NULL, &child, NULL);
+        if (SUCCEEDED(hr))
+            *ppidl = ILCombine(parent, child);
+        IShellFolder_Release(psf);
+        ILFree(child);
+    }
+    ILFree(parent);
+    return hr;
+}
+#endif
+
 /*************************************************************************
  * SHGetFolderLocation [SHELL32.@]
  *
@@ -3154,6 +3338,12 @@ HRESULT WINAPI SHGetFolderLocation(
         case CSIDL_NETWORK:
             *ppidl = _ILCreateNetwork();
             break;
+
+#ifdef __REACTOS__
+        case CSIDL_CONNECTIONS:
+            hr = SHGetFolderLocationHelper(hwndOwner, CSIDL_CONTROLS, &CLSID_NetworkConnections, ppidl);
+            break;
+#endif
 
         default:
         {

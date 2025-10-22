@@ -139,6 +139,7 @@ CcPerformReadAhead(
     ULONG Length;
     PPRIVATE_CACHE_MAP PrivateCacheMap;
     BOOLEAN Locked;
+    BOOLEAN Success;
 
     SharedCacheMap = FileObject->SectionObjectPointer->SharedCacheMap;
 
@@ -206,9 +207,18 @@ CcPerformReadAhead(
             goto Clear;
         }
 
-        Status = CcRosEnsureVacbResident(Vacb, TRUE, FALSE,
-                CurrentOffset % VACB_MAPPING_GRANULARITY, PartialLength);
-        if (!NT_SUCCESS(Status))
+        _SEH2_TRY
+        {
+            Success = CcRosEnsureVacbResident(Vacb, TRUE, FALSE,
+                    CurrentOffset % VACB_MAPPING_GRANULARITY, PartialLength);
+        }
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
+        {
+            Success = FALSE;
+        }
+        _SEH2_END
+
+        if (!Success)
         {
             CcRosReleaseVacb(SharedCacheMap, Vacb, FALSE, FALSE);
             DPRINT1("Failed to read data: %lx!\n", Status);
@@ -234,8 +244,17 @@ CcPerformReadAhead(
             goto Clear;
         }
 
-        Status = CcRosEnsureVacbResident(Vacb, TRUE, FALSE, 0, PartialLength);
-        if (!NT_SUCCESS(Status))
+        _SEH2_TRY
+        {
+            Success = CcRosEnsureVacbResident(Vacb, TRUE, FALSE, 0, PartialLength);
+        }
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
+        {
+            Success = FALSE;
+        }
+        _SEH2_END
+
+        if (!Success)
         {
             CcRosReleaseVacb(SharedCacheMap, Vacb, FALSE, FALSE);
             DPRINT1("Failed to read data: %lx!\n", Status);
@@ -381,6 +400,16 @@ CcCanIWrite (
         return FALSE;
     }
 
+    /* Otherwise, if there are no deferred writes yet, start the lazy writer */
+    if (IsListEmpty(&CcDeferredWrites))
+    {
+        KIRQL OldIrql;
+
+        OldIrql = KeAcquireQueuedSpinLock(LockQueueMasterLock);
+        CcScheduleLazyWriteScan(TRUE);
+        KeReleaseQueuedSpinLock(LockQueueMasterLock, OldIrql);
+    }
+
     /* Initialize our wait event */
     KeInitializeEvent(&WaitEvent, NotificationEvent, FALSE);
 
@@ -407,12 +436,6 @@ CcCanIWrite (
                                     &Context.DeferredWriteLinks,
                                     &CcDeferredWriteSpinLock);
     }
-
-    /* Now make sure that the lazy scan writer will be active */
-    OldIrql = KeAcquireQueuedSpinLock(LockQueueMasterLock);
-    if (!LazyWriter.ScanActive)
-        CcScheduleLazyWriteScan(TRUE);
-    KeReleaseQueuedSpinLock(LockQueueMasterLock, OldIrql);
 
 #if DBG
     DPRINT1("Actively deferring write for: %p\n", FileObject);
@@ -630,7 +653,9 @@ CcCopyWrite (
             CurrentOffset += VacbLength;
 
             /* Tell Mm */
-            Status = MmMakePagesDirty(NULL, Add2Ptr(Vacb->BaseAddress, VacbOffset), VacbLength);
+            Status = MmMakeSegmentDirty(FileObject->SectionObjectPointer,
+                                        Vacb->FileOffset.QuadPart + VacbOffset,
+                                        VacbLength);
             if (!NT_SUCCESS(Status))
                 ExRaiseStatus(Status);
         }
@@ -890,7 +915,9 @@ CcZeroData (
             Length -= VacbLength;
 
             /* Tell Mm */
-            Status = MmMakePagesDirty(NULL, Add2Ptr(Vacb->BaseAddress, VacbOffset), VacbLength);
+            Status = MmMakeSegmentDirty(FileObject->SectionObjectPointer,
+                                        Vacb->FileOffset.QuadPart + VacbOffset,
+                                        VacbLength);
             if (!NT_SUCCESS(Status))
                 ExRaiseStatus(Status);
         }

@@ -530,8 +530,8 @@ GuiInitFrontEnd(IN OUT PFRONTEND This,
     GuiData->hCursor = ghDefaultCursor;
     GuiData->MouseCursorRefCount = 0;
 
-    /* A priori don't ignore mouse signals */
-    GuiData->IgnoreNextMouseSignal = FALSE;
+    /* A priori don't ignore mouse events */
+    GuiData->IgnoreNextMouseEvent = FALSE;
     /* Initialize HACK FOR CORE-8394. See conwnd.c!OnMouse for more details. */
     GuiData->HackCORE8394IgnoreNextMove = FALSE;
 
@@ -1160,7 +1160,7 @@ GuiSetMenuClose(IN OUT PFRONTEND This,
 {
     /*
      * NOTE: See http://www.mail-archive.com/harbour@harbour-project.org/msg27509.html
-     * or http://harbour-devel.1590103.n2.nabble.com/Question-about-hb-gt-win-CtrlHandler-usage-td4670862i20.html
+     * or http://harbour-devel.1590103.n2.nabble.com/Question-about-hb-gt-win-CtrlHandler-usage-td4670862i20.html (DEAD_LINK)
      * for more information.
      */
 

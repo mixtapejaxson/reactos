@@ -900,7 +900,7 @@ SetProcessAffinityMask(IN HANDLE hProcess,
     Status = NtSetInformationProcess(hProcess,
                                      ProcessAffinityMask,
                                      (PVOID)&dwProcessAffinityMask,
-                                     sizeof(DWORD));
+                                     sizeof(dwProcessAffinityMask));
     if (!NT_SUCCESS(Status))
     {
         /* Handle failure */
@@ -1397,8 +1397,7 @@ GetStartupInfoA(IN LPSTARTUPINFOA lpStartupInfo)
                             break;
                         }
 
-                        /* Someone beat us to it, use their data instead */
-                        StartupInfo = BaseAnsiStartupInfo;
+                        /* Someone beat us to it, we will use their data instead */
                         Status = STATUS_SUCCESS;
 
                         /* We're going to free our own stuff, but not raise */
@@ -1409,6 +1408,9 @@ GetStartupInfoA(IN LPSTARTUPINFOA lpStartupInfo)
                 RtlFreeAnsiString(&ShellString);
             }
             RtlFreeHeap(RtlGetProcessHeap(), 0, StartupInfo);
+
+            /* Get the cached information again: either still NULL or set by another thread */
+            StartupInfo = BaseAnsiStartupInfo;
         }
         else
         {
@@ -1417,7 +1419,7 @@ GetStartupInfoA(IN LPSTARTUPINFOA lpStartupInfo)
         }
 
         /* Raise an error unless we got here due to the race condition */
-        if (!NT_SUCCESS(Status)) RtlRaiseStatus(Status);
+        if (!StartupInfo) RtlRaiseStatus(Status);
     }
 
     /* Now copy from the cached ANSI version */
@@ -1627,6 +1629,12 @@ FatalExit(IN int ExitCode)
     /* On Checked builds, Windows gives the user a nice little debugger UI */
     CHAR Action[2];
     DbgPrint("FatalExit...\n\n");
+
+    /* Check for reactos specific flag (set by rosautotest) */
+    if (RtlGetNtGlobalFlags() & FLG_DISABLE_DEBUG_PROMPTS)
+    {
+        RtlRaiseStatus(STATUS_FATAL_APP_EXIT);
+    }
 
     while (TRUE)
     {
@@ -2222,8 +2230,8 @@ ProcessIdToSessionId(IN DWORD dwProcessId,
 }
 
 
-#define AddToHandle(x,y)  (x) = (HANDLE)((ULONG_PTR)(x) | (y));
-#define RemoveFromHandle(x,y)  (x) = (HANDLE)((ULONG_PTR)(x) & ~(y));
+#define AddToHandle(x,y)       ((x) = (HANDLE)((ULONG_PTR)(x) | (y)))
+#define RemoveFromHandle(x,y)  ((x) = (HANDLE)((ULONG_PTR)(x) & ~(y)))
 C_ASSERT(PROCESS_PRIORITY_CLASS_REALTIME == (PROCESS_PRIORITY_CLASS_HIGH + 1));
 
 /*
@@ -2353,6 +2361,7 @@ CreateProcessInternalW(IN HANDLE hUserToken,
     SectionHandle = NULL;
     ProcessHandle = NULL;
     ThreadHandle = NULL;
+    ClientId.UniqueProcess = ClientId.UniqueThread = 0;
     BaseAddress = (PVOID)1;
 
     /* Zero out initial SxS and Application Compatibility state */
@@ -3554,7 +3563,7 @@ StartScan:
 
     /* If the process is being debugged, only read IFEO if the PEB says so */
     if (!(dwCreationFlags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) ||
-        (NtCurrentPeb()->ReadImageFileExecOptions))
+        (Peb->ReadImageFileExecOptions))
     {
         /* Let's do this! Attempt to open IFEO */
         IFEOStatus = LdrOpenImageFileOptionsKey(&PathName, 0, &KeyHandle);
@@ -4180,7 +4189,7 @@ StartScan:
 
     /* Create the Thread's Context */
     BaseInitializeContext(&Context,
-                          Peb,
+                          RemotePeb,
                           ImageInformation.TransferAddress,
                           InitialTeb.StackBase,
                           0);
@@ -4279,13 +4288,12 @@ StartScan:
         }
     }
 
-    /* For all apps, if this flag is on, the hourglass mouse cursor is shown */
+    /* For all apps, if this flag is on, the hourglass mouse cursor is shown.
+     * Likewise, the opposite holds as well, and no-feedback has precedence. */
     if (StartupInfo.dwFlags & STARTF_FORCEONFEEDBACK)
     {
         AddToHandle(CreateProcessMsg->ProcessHandle, 1);
     }
-
-    /* Likewise, the opposite holds as well */
     if (StartupInfo.dwFlags & STARTF_FORCEOFFFEEDBACK)
     {
         RemoveFromHandle(CreateProcessMsg->ProcessHandle, 1);
@@ -4297,8 +4305,8 @@ StartScan:
     /* And if it really is a VDM app... */
     if (VdmBinaryType)
     {
-        /* Store the task ID and VDM console handle */
-        CreateProcessMsg->hVDM = VdmTask ? 0 : Peb->ProcessParameters->ConsoleHandle;
+        /* Store the VDM console handle (none if inherited or WOW app) and the task ID */
+        CreateProcessMsg->hVDM = VdmTask ? NULL : Peb->ProcessParameters->ConsoleHandle;
         CreateProcessMsg->VdmTask = VdmTask;
     }
     else if (VdmReserve)
@@ -4410,10 +4418,9 @@ VdmShortCircuit:
         }
         else
         {
-            /* OR-in the special flag to indicate this is not a separate VDM */
+            /* OR-in the special flag to indicate this is not a separate VDM,
+             * and return the handle to the caller */
             AddToHandle(VdmWaitObject, 1);
-
-            /* Return handle to the caller */
             lpProcessInformation->hProcess = VdmWaitObject;
         }
 
@@ -4524,7 +4531,7 @@ Quickie:
     if (ThreadHandle)
     {
         /* So kill the process and close the thread handle */
-        NtTerminateProcess(ProcessHandle, 0);
+        NtTerminateProcess(ProcessHandle, STATUS_SUCCESS);
         NtClose(ThreadHandle);
     }
 

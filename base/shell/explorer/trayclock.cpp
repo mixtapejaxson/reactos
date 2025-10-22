@@ -38,6 +38,9 @@ const struct
 const UINT ClockWndFormatsCount = _ARRAYSIZE(ClockWndFormats);
 
 #define CLOCKWND_FORMAT_COUNT ClockWndFormatsCount
+#define CLOCKWND_FORMAT_TIME 0
+#define CLOCKWND_FORMAT_DAY  1
+#define CLOCKWND_FORMAT_DATE 2
 
 static const WCHAR szTrayClockWndClass[] = L"TrayClockWClass";
 
@@ -98,10 +101,13 @@ private:
     LRESULT OnSize(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
     LRESULT OnTaskbarSettingsChanged(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
     LRESULT OnLButtonDblClick(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
+    VOID PaintLine(IN HDC hDC, IN OUT RECT *rcClient, IN UINT LineNumber, IN UINT szLinesIndex);
 
 public:
+    // *** IOleWindow methods ***
 
-    HRESULT WINAPI GetWindow(HWND* phwnd)
+    STDMETHODIMP
+    GetWindow(HWND* phwnd) override
     {
         if (!phwnd)
             return E_INVALIDARG;
@@ -109,7 +115,8 @@ public:
         return S_OK;
     }
 
-    HRESULT WINAPI ContextSensitiveHelp(BOOL fEnterMode)
+    STDMETHODIMP
+    ContextSensitiveHelp(BOOL fEnterMode) override
     {
         return E_NOTIMPL;
     }
@@ -262,6 +269,10 @@ WORD CTrayClockWnd::GetMinimumSize(IN BOOL Horizontal, IN OUT PSIZE pSize)
 
     if (!LinesMeasured)
         return 0;
+
+    /* Prevents the date from being cut off when the day of the week is shorter than the date. */
+    if (VisibleLines > 1 && g_TaskbarSettings.bPreferDate)
+        szMax.cx = LineSizes[CLOCKWND_FORMAT_DATE].cx;
 
     for (i = 0; i < CLOCKWND_FORMAT_COUNT; i++)
     {
@@ -529,19 +540,20 @@ LRESULT CTrayClockWnd::OnPaint(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bH
         rcClient.top = (rcClient.bottom - CurrentSize.cy) / 2;
         rcClient.bottom = rcClient.top + CurrentSize.cy;
 
-        for (i = 0, line = 0;
-                i < CLOCKWND_FORMAT_COUNT && line < VisibleLines;
-                i++)
+        if (VisibleLines == 2)
         {
-            if (LineSizes[i].cx != 0)
+            /* Display either time and weekday (by default), or time and date (opt-in) */
+            PaintLine(hDC, &rcClient, 0, CLOCKWND_FORMAT_TIME);
+            PaintLine(hDC, &rcClient, 1,
+                      g_TaskbarSettings.bPreferDate ? CLOCKWND_FORMAT_DATE : CLOCKWND_FORMAT_DAY);
+        }
+        else
+        {
+            for (i = 0, line = 0;
+                 i < CLOCKWND_FORMAT_COUNT && line < VisibleLines;
+                 i++)
             {
-                TextOut(hDC,
-                    (rcClient.right - LineSizes[i].cx) / 2,
-                    rcClient.top + TRAY_CLOCK_WND_SPACING_Y,
-                    szLines[i],
-                    wcslen(szLines[i]));
-
-                rcClient.top += LineSizes[i].cy + LineSpacing;
+                PaintLine(hDC, &rcClient, i, i);
                 line++;
             }
         }
@@ -555,6 +567,23 @@ LRESULT CTrayClockWnd::OnPaint(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bH
         EndPaint(&ps);
 
     return TRUE;
+}
+
+VOID CTrayClockWnd::PaintLine(IN HDC hDC, IN OUT RECT *rcClient, IN UINT LineNumber, IN UINT szLinesIndex)
+{
+    if (LineSizes[LineNumber].cx == 0)
+        return;
+
+    INT HShift = ((IsHorizontal && (VisibleLines <= 1 ||
+                   g_TaskbarSettings.UseCompactTrayIcons())) ? 0 : TRAY_CLOCK_WND_SPACING_X);
+
+    TextOut(hDC,
+            ((rcClient->right - LineSizes[szLinesIndex].cx) / 2) + HShift,
+            rcClient->top + TRAY_CLOCK_WND_SPACING_Y,
+            szLines[szLinesIndex],
+            wcslen(szLines[szLinesIndex]));
+
+    rcClient->top += LineSizes[LineNumber].cy + LineSpacing;
 }
 
 VOID CTrayClockWnd::SetFont(IN HFONT hNewFont, IN BOOL bRedraw)
@@ -637,7 +666,7 @@ LRESULT CTrayClockWnd::OnCreate(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& b
 
     m_tooltip.AddTool(&ti);
 
-    if (!g_TaskbarSettings.sr.HideClock)
+    if (!GetHideClock())
     {
         ResetTime();
     }
@@ -658,33 +687,24 @@ LRESULT CTrayClockWnd::OnSize(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHa
     VisibleLines = GetMinimumSize(IsHorizontal, &szClient);
     CurrentSize = szClient;
 
-    InvalidateRect(NULL, TRUE);
+    UpdateWnd();
     return TRUE;
 }
 
 LRESULT CTrayClockWnd::OnTaskbarSettingsChanged(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
 {
     BOOL bRealign = FALSE;
-
+    BOOL bHideClock = GetHideClock();
     TaskbarSettings* newSettings = (TaskbarSettings*)lParam;
-    if (newSettings->bShowSeconds != g_TaskbarSettings.bShowSeconds)
-    {
-        g_TaskbarSettings.bShowSeconds = newSettings->bShowSeconds;
-        if (!g_TaskbarSettings.sr.HideClock)
-        {
-            bRealign = TRUE;
 
-            ResetTime();
-        }
-    }
-
-    if (newSettings->sr.HideClock != g_TaskbarSettings.sr.HideClock)
+    if (newSettings->sr.HideClock != !IsWindowVisible())
     {
         g_TaskbarSettings.sr.HideClock = newSettings->sr.HideClock;
-        ShowWindow(g_TaskbarSettings.sr.HideClock ? SW_HIDE : SW_SHOW);
+        bHideClock = GetHideClock();
+        ShowWindow(bHideClock ? SW_HIDE : SW_SHOW);
         bRealign = TRUE;
 
-        if (g_TaskbarSettings.sr.HideClock)
+        if (bHideClock)
         {
             /* Disable all timers */
             if (IsTimerEnabled)
@@ -702,6 +722,22 @@ LRESULT CTrayClockWnd::OnTaskbarSettingsChanged(UINT uMsg, WPARAM wParam, LPARAM
         {
             ResetTime();
         }
+    }
+
+    if (newSettings->bShowSeconds != g_TaskbarSettings.bShowSeconds)
+    {
+        g_TaskbarSettings.bShowSeconds = newSettings->bShowSeconds;
+        if (!bHideClock)
+        {
+            bRealign = TRUE;
+            ResetTime();
+        }
+    }
+
+    if (newSettings->bPreferDate != g_TaskbarSettings.bPreferDate)
+    {
+        g_TaskbarSettings.bPreferDate = newSettings->bPreferDate;
+        bRealign = TRUE;
     }
 
     if (bRealign)
@@ -731,7 +767,7 @@ HRESULT CTrayClockWnd::Initialize(IN HWND hWndParent)
     /* Create the window. The tray window is going to move it to the correct
         position and resize it as needed. */
     DWORD dwStyle = WS_CHILD | WS_CLIPSIBLINGS;
-    if (!g_TaskbarSettings.sr.HideClock)
+    if (!GetHideClock())
         dwStyle |= WS_VISIBLE;
 
     Create(hWndParent, 0, NULL, dwStyle);

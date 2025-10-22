@@ -4,12 +4,17 @@ if(ARCH STREQUAL "i386")
         except/i386/chkstk_asm.s
     )
     list(APPEND CRT_EXCEPT_ASM_SOURCE
+        except/i386/__CxxFrameHandler3.s
         except/i386/chkesp.s
         except/i386/prolog.s
     )
+    list(APPEND CRT_EXCEPT_SOURCE
+        except/i386/CxxHandleV8Frame.c
+    )
     if(MSVC)
         list(APPEND CRT_EXCEPT_ASM_SOURCE
-            except/i386/cpp.s)
+            except/i386/cpp.s
+            except/i386/cpp_alias.s)
     endif()
 elseif(ARCH STREQUAL "amd64")
     list(APPEND LIBCNTPR_EXCEPT_SOURCE
@@ -24,7 +29,8 @@ elseif(ARCH STREQUAL "amd64")
     )
     if(MSVC)
         list(APPEND CRT_EXCEPT_ASM_SOURCE
-            except/amd64/cpp.s)
+            except/amd64/cpp.s
+            except/amd64/cpp_alias.s)
     endif()
 elseif(ARCH STREQUAL "arm")
     list(APPEND LIBCNTPR_EXCEPT_SOURCE
@@ -49,7 +55,8 @@ elseif(ARCH STREQUAL "arm")
     )
     if(MSVC)
         list(APPEND CRT_EXCEPT_ASM_SOURCE
-            except/arm/cpp.s)
+            except/arm/cpp.s
+            except/arm/cpp_alias.s)
     endif()
 endif()
 

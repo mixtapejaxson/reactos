@@ -8,7 +8,7 @@
 
 #include "precomp.h"
 
-#define YDEBUG
+// #define NDEBUG
 #include <debug.h>
 
 ULONG
@@ -174,11 +174,6 @@ MMixerGetControlTypeFromTopologyNode(
     {
         /* peakmeter control */
         return MIXERCONTROL_CONTROLTYPE_PEAKMETER;
-    }
-    else if (IsEqualGUIDAligned(NodeType, (LPGUID)&KSNODETYPE_MUX))
-    {
-        /* mux control */
-        return MIXERCONTROL_CONTROLTYPE_MUX;
     }
     else if (IsEqualGUIDAligned(NodeType, (LPGUID)&KSNODETYPE_MUX))
     {

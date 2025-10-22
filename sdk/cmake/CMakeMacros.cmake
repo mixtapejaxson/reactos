@@ -40,10 +40,7 @@ function(add_message_headers _type)
         get_filename_component(_file_name ${_file} NAME_WE)
         set(_converted_file ${CMAKE_CURRENT_BINARY_DIR}/${_file}) ## ${_file_name}.mc
         set(_source_file ${CMAKE_CURRENT_SOURCE_DIR}/${_file})    ## ${_file_name}.mc
-        add_custom_command(
-            OUTPUT "${_converted_file}"
-            COMMAND native-utf16le "${_source_file}" "${_converted_file}" nobom
-            DEPENDS native-utf16le "${_source_file}")
+        utf16le_convert(${_source_file} ${_converted_file} nobom)
         macro_mc(${_flag} ${_converted_file})
         add_custom_command(
             OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${_file_name}.h ${CMAKE_CURRENT_BINARY_DIR}/${_file_name}.rc
@@ -82,7 +79,8 @@ function(add_link)
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${_LINK_NAME}.lnk
         COMMAND native-mkshelllink -o ${CMAKE_CURRENT_BINARY_DIR}/${_LINK_NAME}.lnk ${_LINK_CMD_LINE_ARGS} ${_LINK_ICON} ${_LINK_GUID} ${_LINK_MINIMIZE} ${_LINK_PATH}
         DEPENDS native-mkshelllink)
-    set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${_LINK_NAME}.lnk PROPERTIES GENERATED TRUE)
+    set_source_files_properties(
+        ${CMAKE_CURRENT_BINARY_DIR}/${_LINK_NAME}.lnk PROPERTIES GENERATED TRUE)
 endfunction()
 
 #
@@ -207,8 +205,6 @@ macro(dir_to_num dir var)
         set(${var} 57)
     elseif(${dir} STREQUAL reactos/winsxs/x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef)
         set(${var} 58)
-    elseif(${dir} STREQUAL reactos/winsxs/x86_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef)
-        set(${var} 59)
     elseif(${dir} STREQUAL reactos/bin/suppl)
         set(${var} 60)
     elseif(${dir} STREQUAL reactos/winsxs/x86_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef)
@@ -229,8 +225,6 @@ macro(dir_to_num dir var)
         set(${var} 68)
     elseif(${dir} STREQUAL reactos/winsxs/amd64_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef)
         set(${var} 69)
-    elseif(${dir} STREQUAL reactos/winsxs/amd64_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef)
-        set(${var} 70)
     elseif(${dir} STREQUAL reactos/winsxs/amd64_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef)
         set(${var} 71)
 
@@ -240,8 +234,6 @@ macro(dir_to_num dir var)
         set(${var} 73)
     elseif(${dir} STREQUAL reactos/winsxs/arm_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef)
         set(${var} 74)
-    elseif(${dir} STREQUAL reactos/winsxs/arm_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef)
-        set(${var} 75)
     elseif(${dir} STREQUAL reactos/winsxs/arm_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef)
         set(${var} 76)
 
@@ -251,8 +243,6 @@ macro(dir_to_num dir var)
         set(${var} 78)
     elseif(${dir} STREQUAL reactos/winsxs/arm64_microsoft.windows.gdiplus_6595b64144ccf1df_1.1.7601.23038_none_deadbeef)
         set(${var} 79)
-    elseif(${dir} STREQUAL reactos/winsxs/arm64_reactos.apisets_6595b64144ccf1df_1.0.0.0_none_deadbeef)
-        set(${var} 80)
     elseif(${dir} STREQUAL reactos/winsxs/arm64_microsoft.windows.gdiplus_6595b64144ccf1df_1.0.14393.0_none_deadbeef)
         set(${var} 81)
 
@@ -577,6 +567,39 @@ list(APPEND VALID_MODULE_TYPES kernel kerneldll kernelmodedriver wdmdriver nativ
 list(APPEND KERNEL_MODULE_TYPES kernel kerneldll kernelmodedriver wdmdriver)
 list(APPEND NATIVE_MODULE_TYPES kernel kerneldll kernelmodedriver wdmdriver nativecui nativedll)
 
+# Signs a driver if it is kernelmodedriver or wdmdriver if the cert exists
+function(sign_driver_if_needed TARGET)
+    get_target_property(_type ${TARGET} REACTOS_MODULE_TYPE)
+    if(NOT _type)
+        message(STATUS "sign_driver_if_needed: No REACTOS_MODULE_TYPE for ${TARGET}")
+        return()
+    endif()
+    if(NOT (_type STREQUAL "kernelmodedriver" OR _type STREQUAL "wdmdriver"))
+        return()
+    endif()
+    if(NOT MSVC)
+        return()
+    endif()
+    if(NOT EXISTS "C:/ReactOSCerts/ReactOSDevCert.cer")
+        return()
+    endif()
+    # Get output file name
+    get_target_property(_output_name ${TARGET} OUTPUT_NAME)
+    if(NOT _output_name)
+        set(_output_name ${TARGET})
+    endif()
+    set(_driver_path "${CMAKE_CURRENT_BINARY_DIR}/${_output_name}.sys")
+    set(_driver_path "$<TARGET_FILE:${TARGET}>")
+    add_custom_command(TARGET ${TARGET} POST_BUILD
+        COMMAND SignTool sign /v /fd sha1 /s PrivateCertStore /n reactos.org /t http://timestamp.digicert.com "${_driver_path}"
+        COMMENT "Signing driver: ${_driver_path}")
+endfunction()
+
+# Example usage after driver target creation:
+# add_library(my_driver ...)
+# set_module_type(my_driver kernelmodedriver)
+# sign_driver_if_needed(my_driver)
+
 function(set_module_type MODULE TYPE)
     cmake_parse_arguments(__module "UNICODE" "IMAGEBASE" "ENTRYPOINT" ${ARGN})
 
@@ -642,8 +665,11 @@ function(set_module_type MODULE TYPE)
     endif()
 
     # Set base address
+    # Use 'IMAGEBASE default' to skip these set_image_base(), especially for win32dll test files
     if(__module_IMAGEBASE)
-        set_image_base(${MODULE} ${__module_IMAGEBASE})
+        if(NOT ${__module_IMAGEBASE} STREQUAL "default")
+            set_image_base(${MODULE} ${__module_IMAGEBASE})
+        endif()
     elseif(${TYPE} STREQUAL win32dll)
         if(DEFINED baseaddress_${MODULE})
             set_image_base(${MODULE} ${baseaddress_${MODULE}})
@@ -664,6 +690,7 @@ function(set_module_type MODULE TYPE)
         add_dependencies(${MODULE} bugcodes xdk)
         if((${TYPE} STREQUAL kernelmodedriver) OR (${TYPE} STREQUAL wdmdriver))
             set_target_properties(${MODULE} PROPERTIES SUFFIX ".sys")
+            sign_driver_if_needed(${MODULE})
         endif()
     endif()
 
@@ -701,6 +728,13 @@ function(end_module_group)
         add_dependencies(${CURRENT_MODULE_GROUP} ${__module})
     endforeach()
     set(CURRENT_MODULE_GROUP PARENT_SCOPE)
+endfunction()
+
+function(utf16le_convert _in _out)
+    add_custom_command(OUTPUT "${_out}"
+                       COMMAND native-utf16le "${_in}" "${_out}" ${ARGN}
+                       DEPENDS native-utf16le "${_in}")
+    set_source_files_properties("${_out}" PROPERTIES GENERATED TRUE)
 endfunction()
 
 function(preprocess_file __in __out)
@@ -760,9 +794,7 @@ function(create_registry_hives)
         file(RELATIVE_PATH _subdir ${CMAKE_SOURCE_DIR} ${_file})
         get_filename_component(_subdir ${_subdir}  DIRECTORY)
         set(_converted_file ${CMAKE_BINARY_DIR}/${_subdir}/${_file_name}_utf16.inf)
-        add_custom_command(OUTPUT ${_converted_file}
-                           COMMAND native-utf16le ${_file} ${_converted_file}
-                           DEPENDS native-utf16le ${_file})
+        utf16le_convert(${_file} ${_converted_file})
         list(APPEND _converted_files ${_converted_file})
     endforeach()
 
@@ -858,9 +890,7 @@ function(add_driver_inf _module)
     foreach(_file ${ARGN})
         set(_converted_item ${CMAKE_CURRENT_BINARY_DIR}/${_file})
         set(_source_item ${CMAKE_CURRENT_SOURCE_DIR}/${_file})
-        add_custom_command(OUTPUT "${_converted_item}"
-                           COMMAND native-utf16le "${_source_item}" "${_converted_item}"
-                           DEPENDS native-utf16le "${_source_item}")
+        utf16le_convert(${_source_item} ${_converted_item})
         list(APPEND _converted_inf_files ${_converted_item})
     endforeach()
 

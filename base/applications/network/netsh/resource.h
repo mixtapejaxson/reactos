@@ -1,0 +1,48 @@
+/*
+ * PROJECT:    ReactOS NetSh
+ * LICENSE:    GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
+ * PURPOSE:    Network Shell resource id header file
+ * COPYRIGHT:  Copyright 2023 Eric Kohl <eric.kohl@reactos.org>
+ */
+
+#pragma once
+
+#define IDS_NONE -1
+
+#define IDS_APP_USAGE            100
+#define IDS_APP_PROMPT           101
+#define IDS_INVALID_COMMAND      102
+#define IDS_OPEN_FAILED          103
+#define IDS_INVALID_SYNTAX       104
+#define IDS_THIS_COMMANDS        105
+#define IDS_CONTEXT_COMMANDS     106
+
+#define IDS_HELP_HEADER          200
+#define IDS_HELP_FOOTER          201
+#define IDS_SUBCONTEXT_HEADER    202
+
+#define IDS_HLP_EXIT             300
+#define IDS_HLP_EXIT_EX          301
+#define IDS_HLP_HELP             302
+#define IDS_HLP_HELP_EX          303
+#define IDS_HLP_UP               304
+#define IDS_HLP_UP_EX            305
+#define IDS_HLP_POPD             306
+#define IDS_HLP_POPD_EX          307
+#define IDS_HLP_PUSHD            308
+#define IDS_HLP_PUSHD_EX         309
+#define IDS_HLP_EXEC             310
+#define IDS_HLP_EXEC_EX          311
+#define IDS_HLP_DUMP             312
+#define IDS_HLP_DUMP_EX          313
+
+#define IDS_HLP_ADD_HELPER       320
+#define IDS_HLP_ADD_HELPER_EX    321
+#define IDS_HLP_DEL_HELPER       322
+#define IDS_HLP_DEL_HELPER_EX    323
+#define IDS_HLP_SHOW_HELPER      324
+#define IDS_HLP_SHOW_HELPER_EX   325
+
+#define IDS_HLP_GROUP_ADD        330
+#define IDS_HLP_GROUP_DELETE     331
+#define IDS_HLP_GROUP_SHOW       332

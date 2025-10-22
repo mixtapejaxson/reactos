@@ -13,8 +13,6 @@
 // #define NTLDR_PROGRESSBAR
 // #define BTMGR_PROGRESSBAR /* Default style */
 
-#ifndef _M_ARM
-
 BOOLEAN MiniTuiInitialize(VOID)
 {
     /* Initialize main TUI */
@@ -55,10 +53,10 @@ BOOLEAN MiniTuiInitialize(VOID)
     return TRUE;
 }
 
-VOID MiniTuiDrawBackdrop(VOID)
+VOID MiniTuiDrawBackdrop(ULONG DrawHeight)
 {
     /* Fill in a black background */
-    TuiFillArea(0, 0, UiScreenWidth - 1, UiScreenHeight - 1,
+    TuiFillArea(0, 0, UiScreenWidth - 1, DrawHeight - 1,
                 UiBackdropFillStyle,
                 ATTR(UiBackdropFgColor, UiBackdropBgColor));
 
@@ -66,12 +64,16 @@ VOID MiniTuiDrawBackdrop(VOID)
     VideoCopyOffScreenBufferToVRAM();
 }
 
+VOID MiniTuiFadeInBackdrop(VOID)
+{
+    /* No fade-in effect in MiniTui */
+    MiniTuiDrawBackdrop(UiScreenHeight);
+}
+
 VOID MiniTuiDrawStatusText(PCSTR StatusText)
 {
     /* Minimal UI doesn't have a status bar */
 }
-
-#endif // _M_ARM
 
 /*static*/ VOID
 MiniTuiSetProgressBarText(
@@ -143,10 +145,8 @@ MiniTuiTickProgressBar(
                 UiProgressBar.Right, UiProgressBar.Bottom,
                 ' ', ATTR(UiTextColor, UiMenuBgColor));
 
-#ifndef _M_ARM
     TuiUpdateDateTime();
     VideoCopyOffScreenBufferToVRAM();
-#endif
 }
 
 VOID
@@ -191,10 +191,8 @@ MiniTuiDrawMenu(
 {
     ULONG i;
 
-#ifndef _M_ARM
     /* Draw the backdrop */
-    UiDrawBackdrop();
-#endif
+    UiDrawBackdrop(UiGetScreenHeight());
 
     /* No GUI status bar text, just minimal text. Show the menu header. */
     if (MenuInfo->MenuHeader)
@@ -233,18 +231,8 @@ MiniTuiDrawMenu(
                         ATTR(UiMenuFgColor, UiMenuBgColor));
     }
 
-    /* Display the boot options if needed */
-    if (MenuInfo->ShowBootOptions)
-    {
-        DisplayBootTimeOptions();
-    }
-
-#ifndef _M_ARM
     VideoCopyOffScreenBufferToVRAM();
-#endif
 }
-
-#ifndef _M_ARM
 
 const UIVTBL MiniTuiVtbl =
 {
@@ -268,10 +256,9 @@ const UIVTBL MiniTuiVtbl =
     TuiEditBox,
     TuiTextToColor,
     TuiTextToFillStyle,
-    MiniTuiDrawBackdrop, /* no FadeIn */
+    MiniTuiFadeInBackdrop,
     TuiFadeOut,
     TuiDisplayMenu,
     MiniTuiDrawMenu,
 };
 
-#endif // _M_ARM

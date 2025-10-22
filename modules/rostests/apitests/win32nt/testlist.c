@@ -1,4 +1,3 @@
-#define __ROS_LONG64__
 
 #define STANDALONE
 #include <apitest.h>
@@ -72,7 +71,7 @@ const struct test winetest_testlist[] =
     /* ntdd*/
     { "NtGdiDdCreateDirectDrawObject", func_NtGdiDdCreateDirectDrawObject },
     { "NtGdiDdDeleteDirectDrawObject", func_NtGdiDdDeleteDirectDrawObject },
-    { "NtGdiDdQueryDirectDrawObject", func_NtGdiDdQueryDirectDrawObject },
+    // { "NtGdiDdQueryDirectDrawObject", func_NtGdiDdQueryDirectDrawObject },
     { "NtGdiArcInternal", func_NtGdiArcInternal },
 
     /* ntgdi */

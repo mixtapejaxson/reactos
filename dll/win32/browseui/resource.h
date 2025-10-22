@@ -20,6 +20,7 @@
 
 #pragma once
 
+// FCIDM_BROWSERFIRST..LAST: 0xa000..0xbf00
 #define IDM_FILE_CLOSE                   0xA021
 #define IDM_FILE_EXPLORE_MENU            0xA027
 #define IDM_BACKSPACE                    0xA032
@@ -63,6 +64,8 @@
 #define IDM_BAND_MENU                       269
 #define IDM_BAND_TITLE                   0xA200
 #define IDM_BAND_CLOSE                   0xA201
+#define FCIDM_BROWSER_STOP               0xA21A
+#define FCIDM_BROWSER_TOGGLEFULLSCREEN   0xA21B
 
 #define IDM_POPUPMENU        2001
 #define IDM_LARGE_ICONS      2002
@@ -73,6 +76,7 @@
 
 /* Random id for band close button, feel free to change it */
 #define IDM_BASEBAR_CLOSE                0xA200
+#define IDM_NOTIFYITBARDIRTY             0xA239 /* Arbitrary id */
 
 /* User-installed explorer band IDs according to API Monitor traces */
 #define IDM_EXPLORERBAND_BEGINCUSTOM     0xA240
@@ -98,7 +102,6 @@
 #define IDR_INTERNETTOOLBAR      136
 #define IDR_GLOBALFOLDERSETTINGS 137
 #define IDR_REGTREEOPTIONS       138
-#define IDR_EXPLORERBAND         139
 #define IDR_PROGRESSDIALOG       140
 #define IDR_AUTOCOMPLETE         141
 #define IDR_ACLISTISF            142
@@ -124,7 +127,6 @@
 #define IDS_SEARCHLABEL          12897
 #define IDS_STANDARD_TOOLBAR     12624
 #define IDS_ADDRESSBANDLABEL     12902
-#define IDS_FOLDERSLABEL         12919
 #define IDS_ADDRESSMENUTEXT      13137
 #define IDS_HISTORYTEXT          13169
 #define IDS_UP                   58434
@@ -177,6 +179,7 @@
 #define IDS_SEARCH_FOLDER       9234
 #define IDS_SEARCH_RESULTS      30520
 #define IDS_SEARCH_OPEN_FOLDER  40960
+#define IDC_STATUSBAR           40961
 
 #define IDS_PARSE_ADDR_ERR_TITLE 9600
 #define IDS_PARSE_ADDR_ERR_TEXT  9601

@@ -26,6 +26,9 @@ KMT_TESTFUNC Test_FsRtlLegal;
 KMT_TESTFUNC Test_FsRtlMcb;
 KMT_TESTFUNC Test_FsRtlRemoveDotsFromPath;
 KMT_TESTFUNC Test_FsRtlTunnel;
+#if defined(_M_IX86) || defined(_M_AMD64)
+KMT_TESTFUNC Test_HalPortIo;
+#endif
 KMT_TESTFUNC Test_HalSystemInfo;
 KMT_TESTFUNC Test_IoCreateFile;
 KMT_TESTFUNC Test_IoDeviceInterface;
@@ -35,6 +38,7 @@ KMT_TESTFUNC Test_IoInterrupt;
 KMT_TESTFUNC Test_IoIrp;
 KMT_TESTFUNC Test_IoMdl;
 KMT_TESTFUNC Test_IoVolume;
+KMT_TESTFUNC Test_KdSystemDebugControl;
 KMT_TESTFUNC Test_KeApc;
 KMT_TESTFUNC Test_KeDeviceQueue;
 KMT_TESTFUNC Test_KeDpc;
@@ -71,6 +75,7 @@ KMT_TESTFUNC Test_SeLogonSession;
 KMT_TESTFUNC Test_SeQueryInfoToken;
 KMT_TESTFUNC Test_SeTokenFiltering;
 KMT_TESTFUNC Test_RtlAvlTree;
+KMT_TESTFUNC Test_RtlCaptureContext;
 KMT_TESTFUNC Test_RtlException;
 KMT_TESTFUNC Test_RtlIntSafe;
 KMT_TESTFUNC Test_RtlIsValidOemCharacter;
@@ -108,6 +113,9 @@ const KMT_TEST TestList[] =
     { "FsRtlMcb",                           Test_FsRtlMcb },
     { "FsRtlRemoveDotsFromPath",            Test_FsRtlRemoveDotsFromPath },
     { "FsRtlTunnel",                        Test_FsRtlTunnel },
+#if defined(_M_IX86) || defined(_M_AMD64)
+    { "HalPortIo",                          Test_HalPortIo },
+#endif
     { "HalSystemInfo",                      Test_HalSystemInfo },
     { "IoCreateFile",                       Test_IoCreateFile },
     { "IoDeviceInterface",                  Test_IoDeviceInterface },
@@ -117,6 +125,7 @@ const KMT_TEST TestList[] =
     { "IoIrp",                              Test_IoIrp },
     { "IoMdl",                              Test_IoMdl },
     { "IoVolume",                           Test_IoVolume },
+    { "KdSystemDebugControl",               Test_KdSystemDebugControl },
     { "KeApc",                              Test_KeApc },
     { "KeDeviceQueue",                      Test_KeDeviceQueue },
     { "KeDpc",                              Test_KeDpc },
@@ -167,5 +176,8 @@ const KMT_TEST TestList[] =
     { "ZwCreateSection",                    Test_ZwCreateSection },
     { "ZwMapViewOfSection",                 Test_ZwMapViewOfSection },
     { "ZwWaitForMultipleObjects",           Test_ZwWaitForMultipleObjects},
+#ifdef _M_AMD64
+    { "RtlCaptureContextKM",                Test_RtlCaptureContext },
+#endif
     { NULL,                                 NULL }
 };

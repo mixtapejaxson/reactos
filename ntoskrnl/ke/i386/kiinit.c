@@ -384,7 +384,7 @@ KiVerifyCpuFeatures(PKPRCB Prcb)
         KeBugCheckEx(UNSUPPORTED_PROCESSOR, 0x386, 0, 0, 0);
 
     // 3. Finally, obtain CPU features.
-    ULONG FeatureBits = KiGetFeatureBits();
+    ULONG64 FeatureBits = KiGetFeatureBits();
 
     // 4. Verify it supports everything we need.
     if (!(FeatureBits & KF_RDTSC))
@@ -413,7 +413,7 @@ KiVerifyCpuFeatures(PKPRCB Prcb)
     Cr0 &= ~(CR0_EM | CR0_MP);
     // Enable FPU exceptions.
     Cr0 |= CR0_NE;
-    
+
     __writecr0(Cr0);
 
     // Check for Pentium FPU bug.
@@ -423,7 +423,8 @@ KiVerifyCpuFeatures(PKPRCB Prcb)
     }
 
     // 5. Save feature bits.
-    Prcb->FeatureBits = FeatureBits;
+    Prcb->FeatureBits = (ULONG)FeatureBits;
+    Prcb->FeatureBitsHigh = FeatureBits >> 32;
 }
 
 CODE_SEG("INIT")
@@ -445,7 +446,7 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
 
     /* Set boot-level flags */
     if (Number == 0)
-        KeFeatureBits = Prcb->FeatureBits;
+        KeFeatureBits = Prcb->FeatureBits | (ULONG64)Prcb->FeatureBitsHigh << 32;
 
     /* Set the default NX policy (opt-in) */
     SharedUserData->NXSupportPolicy = NX_SUPPORT_POLICY_OPTIN;
@@ -480,20 +481,25 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
     /* Save CPU state */
     KiSaveProcessorControlState(&Prcb->ProcessorState);
 
+#if DBG
+    /* Print applied kernel features/policies and boot CPU features */
+    if (Number == 0)
+        KiReportCpuFeatures();
+#endif
+
     /* Get cache line information for this CPU */
     KiGetCacheInformation();
 
     /* Initialize spinlocks and DPC data */
     KiInitSpinLocks(Prcb, Number);
 
+    /* Set Node Data */
+    Prcb->ParentNode = KeNodeBlock[0];
+    Prcb->ParentNode->ProcessorMask |= Prcb->SetMember;
+
     /* Check if this is the Boot CPU */
     if (!Number)
     {
-        /* Set Node Data */
-        KeNodeBlock[0] = &KiNode0;
-        Prcb->ParentNode = KeNodeBlock[0];
-        KeNodeBlock[0]->ProcessorMask = Prcb->SetMember;
-
         /* Set boot-level flags */
         KeI386CpuType = Prcb->CpuType;
         KeI386CpuStep = Prcb->CpuStep;
@@ -522,7 +528,7 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
         PageDirectory[1] = 0;
         KeInitializeProcess(InitProcess,
                             0,
-                            0xFFFFFFFF,
+                            MAXULONG_PTR,
                             PageDirectory,
                             FALSE);
         InitProcess->QuantumReset = MAXCHAR;
@@ -530,7 +536,7 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
     else
     {
         /* FIXME */
-        DPRINT1("SMP Boot support not yet present\n");
+        DPRINT1("Starting CPU#%u - you are brave\n", Number);
     }
 
     /* Setup the Idle Thread */
@@ -566,6 +572,17 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
         (KeFeatureBits & KF_3DNOW) ? TRUE: FALSE;
     SharedUserData->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] =
         (KeFeatureBits & KF_RDTSC) ? TRUE: FALSE;
+    SharedUserData->ProcessorFeatures[PF_RDRAND_INSTRUCTION_AVAILABLE] =
+        (KeFeatureBits & KF_RDRAND) ? TRUE : FALSE;
+    // Note: On x86 we lack support for saving/restoring SSE state
+    SharedUserData->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE] =
+        (KeFeatureBits & KF_SSE3) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_SSSE3_INSTRUCTIONS_AVAILABLE] =
+        (KeFeatureBits & KF_SSSE3) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_SSE4_1_INSTRUCTIONS_AVAILABLE] =
+        (KeFeatureBits & KF_SSE4_1) ? TRUE : FALSE;
+    SharedUserData->ProcessorFeatures[PF_SSE4_2_INSTRUCTIONS_AVAILABLE] =
+        (KeFeatureBits & KF_SSE4_2) ? TRUE : FALSE;
 
     /* Set up the thread-related fields in the PRCB */
     Prcb->CurrentThread = InitThread;
@@ -805,6 +822,18 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     RtlCopyMemory(&Idt[8], &DoubleFaultEntry, sizeof(KIDTENTRY));
 
 AppCpuInit:
+    //TODO: We don't setup IPIs yet so freeze other processors here.
+    if (Cpu)
+    {
+        KeMemoryBarrier();
+        LoaderBlock->Prcb = 0;
+
+        for (;;)
+        {
+            YieldProcessor();
+        }
+    }
+
     /* Loop until we can release the freeze lock */
     do
     {

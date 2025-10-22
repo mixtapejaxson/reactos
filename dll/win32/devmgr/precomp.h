@@ -76,6 +76,8 @@ OUT LPDWORD lpReboot);
 #include <devmgr/devmgr.h>
 #include <wine/debug.h>
 
-//WINE_DEFAULT_DEBUG_CHANNEL(devmgr);
+#define DYNAMIC_FIELD_OFFSET(Type, Field) ((LONG)(LONG_PTR)&(((Type*) 0)->Field))
+
+// WINE_DEFAULT_DEBUG_CHANNEL(devmgr);
 
 #endif

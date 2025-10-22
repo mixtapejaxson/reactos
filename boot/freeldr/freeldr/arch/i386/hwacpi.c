@@ -25,6 +25,11 @@ DBG_DEFAULT_CHANNEL(HWDETECT);
 
 BOOLEAN AcpiPresent = FALSE;
 
+BOOLEAN IsAcpiPresent(VOID)
+{
+    return AcpiPresent;
+}
+
 static PRSDP_DESCRIPTOR
 FindAcpiBios(VOID)
 {
@@ -116,8 +121,8 @@ DetectAcpiBios(PCONFIGURATION_COMPONENT_DATA SystemKey, ULONG *BusNumber)
         FldrCreateComponentKey(SystemKey,
                                AdapterClass,
                                MultiFunctionAdapter,
-                               0x0,
-                               0x0,
+                               0,
+                               0,
                                0xFFFFFFFF,
                                "ACPI BIOS",
                                PartialResourceList,

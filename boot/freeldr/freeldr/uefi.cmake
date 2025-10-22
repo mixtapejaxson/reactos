@@ -14,20 +14,28 @@ include_directories(BEFORE
 list(APPEND UEFILDR_ARC_SOURCE
     ${FREELDR_ARC_SOURCE}
     arch/uefi/stubs.c
-    arch/uefi/uefisetup.c
-    arch/uefi/uefivid.c
-    arch/uefi/uefiutil.c
     arch/uefi/ueficon.c
+    arch/uefi/uefidisk.c
+    arch/uefi/uefihw.c
     arch/uefi/uefimem.c
+    arch/uefi/uefisetup.c
+    arch/uefi/uefiutil.c
+    arch/uefi/uefivid.c
     arch/vgafont.c)
 
 if(ARCH STREQUAL "i386")
+    list(APPEND UEFILDR_ARC_SOURCE
+        arch/i386/i386idt.c)
     list(APPEND UEFILDR_COMMON_ASM_SOURCE
+        arch/uefi/i386/uefiasm.S
         arch/i386/i386trap.S)
-
 elseif(ARCH STREQUAL "amd64")
-    #TBD
+    list(APPEND UEFILDR_COMMON_ASM_SOURCE
+        arch/uefi/amd64/uefiasm.S)
 elseif(ARCH STREQUAL "arm")
+    list(APPEND UEFILDR_ARC_SOURCE
+        arch/arm/macharm.c
+        arch/arm/debug.c)
     #TBD
 elseif(ARCH STREQUAL "arm64")
     #TBD
@@ -35,13 +43,20 @@ else()
     #TBD
 endif()
 
+list(APPEND UEFILDR_BOOTMGR_SOURCE
+    ${FREELDR_BOOTMGR_SOURCE}
+    custom.c
+    options.c
+    oslist.c
+)
+
 add_asm_files(uefifreeldr_common_asm ${FREELDR_COMMON_ASM_SOURCE} ${UEFILDR_COMMON_ASM_SOURCE})
 
 add_library(uefifreeldr_common
     ${uefifreeldr_common_asm}
     ${UEFILDR_ARC_SOURCE}
     ${FREELDR_BOOTLIB_SOURCE}
-    ${FREELDR_BOOTMGR_SOURCE}
+    ${UEFILDR_BOOTMGR_SOURCE}
     ${FREELDR_NTLDR_SOURCE})
 
 target_compile_definitions(uefifreeldr_common PRIVATE UEFIBOOT)
@@ -54,7 +69,7 @@ endif()
 set(PCH_SOURCE
     ${UEFILDR_ARC_SOURCE}
     ${FREELDR_BOOTLIB_SOURCE}
-    ${FREELDR_BOOTMGR_SOURCE}
+    ${UEFILDR_BOOTMGR_SOURCE}
     ${FREELDR_NTLDR_SOURCE})
 
 add_pch(uefifreeldr_common include/arch/uefi/uefildr.h PCH_SOURCE)
@@ -71,6 +86,9 @@ spec2def(uefildr.exe freeldr.spec)
 list(APPEND UEFILDR_BASE_SOURCE
     include/arch/uefi/uefildr.h
     arch/uefi/uefildr.c
+    bootmgr.c
+    ntldr/setupldr.c
+    ntldr/inffile.c
     ${FREELDR_BASE_SOURCE})
 
 if(ARCH STREQUAL "i386")
@@ -84,8 +102,16 @@ set_target_properties(uefildr PROPERTIES SUFFIX ".efi")
 
 target_compile_definitions(uefildr PRIVATE UEFIBOOT)
 
+# On AMD64 we only map 1GB with freeloader, tell UEFI to keep us low!
+if(ARCH STREQUAL "amd64")
+    set_image_base(uefildr 0x10000)
+endif()
+
 if(MSVC)
-    target_link_options(uefildr PRIVATE /DYNAMICBASE:NO /NXCOMPAT:NO /ignore:4078 /ignore:4254 /DRIVER)
+if(NOT ARCH STREQUAL "arm")
+    target_link_options(uefildr PRIVATE /DYNAMICBASE:NO)
+endif()
+    target_link_options(uefildr PRIVATE /NXCOMPAT:NO /ignore:4078 /ignore:4254 /DRIVER)
     # We don't need hotpatching
     remove_target_compile_option(uefildr "/hotpatch")
 else()

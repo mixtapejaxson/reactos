@@ -4,6 +4,10 @@ set(USE_DIBLIB FALSE)
 # Give WIN32 subsystem its own project.
 PROJECT(WIN32SS)
 
+if (NATIVE_REACTX)
+    add_definitions(-DNATIVE_REACTX)
+endif()
+
 add_subdirectory(drivers)
 
 if(USE_DIBLIB)
@@ -14,7 +18,9 @@ add_subdirectory(gdi/gdi32)
 add_subdirectory(gdi/gdi32_vista)
 add_subdirectory(printing)
 add_subdirectory(reactx)
+add_subdirectory(user/imm32)
 add_subdirectory(user/user32)
+add_subdirectory(user/user32_vista)
 add_subdirectory(user/winsrv)
 
 spec2def(win32k.sys win32k.spec ADD_IMPORTLIB)
@@ -142,6 +148,7 @@ list(APPEND SOURCE
     user/ntuser/ntstubs.c
     user/ntuser/ntuser.c
     user/ntuser/painting.c
+    user/ntuser/power.c
     user/ntuser/prop.c
     user/ntuser/scrollbar.c
     user/ntuser/scrollex.c
@@ -159,6 +166,7 @@ list(APPEND SOURCE
     user/ntuser/winpos.c
     user/ntuser/winsta.c
     user/ntuser/object.c
+    user/rtl/image.c
     user/rtl/text.c
     gdi/ntgdi/arc.c
     gdi/ntgdi/bezier.c
@@ -166,6 +174,7 @@ list(APPEND SOURCE
     gdi/ntgdi/bitmaps.c
     gdi/ntgdi/cliprgn.c
     gdi/ntgdi/coord.c
+    gdi/ntgdi/d3dkmt.c
     gdi/ntgdi/dcattr.c
     gdi/ntgdi/dclife.c
     gdi/ntgdi/dcobjs.c
@@ -250,7 +259,11 @@ add_importlibs(win32k ntoskrnl hal ftfd)
 add_pch(win32k pch.h SOURCE)
 add_cd_file(TARGET win32k DESTINATION reactos/system32 FOR all)
 
-set_source_files_properties(sys-stubs.S PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/w32ksvc.h)
+if(ARCH STREQUAL "amd64")
+    set_source_files_properties(sys-stubs.S PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/w32ksvc64.h)
+else()
+    set_source_files_properties(sys-stubs.S PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/w32ksvc32.h)
+endif()
 add_asm_files(win32ksys_asm sys-stubs.S)
 add_library(win32ksys ${win32ksys_asm})
 set_target_properties(win32ksys PROPERTIES LINKER_LANGUAGE "C")

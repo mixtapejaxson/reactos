@@ -25,16 +25,12 @@ HalpInitProcessor(
     IN ULONG ProcessorNumber,
     IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 {
-#ifdef CONFIG_SMP
     if (ProcessorNumber == 0)
     {
-#endif
         HalpParseApicTables(LoaderBlock);
-#ifdef CONFIG_SMP
     }
 
     HalpSetupProcessorsTable(ProcessorNumber);
-#endif
 
     /* Initialize the local APIC for this cpu */
     ApicInitializeLocalApic(ProcessorNumber);
@@ -61,6 +57,14 @@ HalpInitPhase0(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
                                APIC_CLOCK_VECTOR,
                                CLOCK2_LEVEL,
                                HalpClockInterrupt,
+                               Latched);
+
+    /* Enable profile interrupt handler */
+    HalpEnableInterruptHandler(IDT_DEVICE,
+                               0,
+                               APIC_PROFILE_VECTOR,
+                               APIC_PROFILE_LEVEL,
+                               HalpProfileInterrupt,
                                Latched);
 }
 

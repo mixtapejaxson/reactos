@@ -1,9 +1,8 @@
 /*
- * PROJECT:     PAINT for ReactOS
- * LICENSE:     LGPL
- * FILE:        base/applications/mspaint/palette.h
- * PURPOSE:     Window procedure of the palette window
- * PROGRAMMERS: Benedikt Freisen
+ * PROJECT:    PAINT for ReactOS
+ * LICENSE:    LGPL-2.0-or-later (https://spdx.org/licenses/LGPL-2.0-or-later)
+ * PURPOSE:    Window procedure of the palette window
+ * COPYRIGHT:  Copyright 2015 Benedikt Freisen <b.freisen@gmx.net>
  */
 
 #pragma once
@@ -15,7 +14,7 @@
 class CPaletteWindow : public CWindowImpl<CPaletteWindow>
 {
 public:
-    DECLARE_WND_CLASS_EX(_T("Palette"), CS_DBLCLKS, COLOR_BTNFACE)
+    DECLARE_WND_CLASS_EX(L"Palette", CS_DBLCLKS, COLOR_BTNFACE)
 
     BEGIN_MSG_MAP(CPaletteWindow)
         MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
@@ -27,8 +26,13 @@ public:
         MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
         MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
         MESSAGE_HANDLER(WM_PALETTEMODELCOLORCHANGED, OnPaletteModelColorChanged)
-        MESSAGE_HANDLER(WM_PALETTEMODELPALETTECHANGED, OnPaletteModelPaletteChanged)
     END_MSG_MAP()
+
+    CPaletteWindow();
+    virtual ~CPaletteWindow();
+
+protected:
+    HBITMAP m_hbmCached; // Cached buffer bitmap
 
     LRESULT OnEraseBkgnd(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
     LRESULT OnPaint(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
@@ -39,7 +43,6 @@ public:
     LRESULT OnMouseMove(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
     LRESULT OnLButtonUp(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
     LRESULT OnPaletteModelColorChanged(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
-    LRESULT OnPaletteModelPaletteChanged(UINT nMsg, WPARAM wParam, LPARAM lParam, BOOL& bHandled);
 
 protected:
     INT DoHitTest(INT xPos, INT yPos) const;

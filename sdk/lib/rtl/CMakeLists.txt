@@ -8,12 +8,28 @@ add_definitions(
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # Enable this again. CORE-17637
     add_compile_options(-Wunused-result)
+
+    add_compile_options(-Wno-incompatible-pointer-types)
+    add_compile_options(-Wno-missing-braces)
+endif()
+
+list(APPEND RTL_WINE_SOURCE
+    actctx.c
+    timerqueue.c
+    threadpool.c
+)
+set_source_files_properties(threadpool.c PROPERTIES COMPILE_DEFINITIONS __WINESRC__)
+
+if(MSVC)
+    # Silence warning C4267: 'initializing': conversion from 'size_t' to 'const int', possible loss of data
+    set_source_files_properties(${RTL_WINE_SOURCE} PROPERTIES COMPILE_OPTIONS "/wd4267")
 endif()
 
 list(APPEND SOURCE
+    ${RTL_WINE_SOURCE}
+    wine_debug.c
     access.c
     acl.c
-    actctx.c
     appverifier.c
     assert.c
     atom.c
@@ -39,6 +55,7 @@ list(APPEND SOURCE
     image.c
     interlck.c
     largeint.c
+    locale.c
     luid.c
     memstream.c
     message.c
@@ -64,7 +81,6 @@ list(APPEND SOURCE
     sysvol.c
     thread.c
     time.c
-    timerqueue.c
     timezone.c
     trace.c
     unicode.c
@@ -90,7 +106,8 @@ elseif(ARCH STREQUAL "amd64")
     list(APPEND ASM_SOURCE
         amd64/debug_asm.S
         amd64/except_asm.S
-        amd64/slist.S)
+        amd64/slist.S
+        amd64/unwind-asm.s)
     list(APPEND SOURCE
         bitmap64.c
         byteswap.c
@@ -115,6 +132,7 @@ add_dependencies(rtl psdk asm)
 
 list(APPEND SOURCE_VISTA
     condvar.c
+    locale.c
     runonce.c
     srw.c
     utf8.c)

@@ -26,7 +26,8 @@ const UNICODE_STRING InstalledSDBKeyName = RTL_CONSTANT_STRING(L"\\Registry\\Mac
 /* from dpfilter.h */
 #define DPFLTR_APPCOMPAT_ID 123
 
-#define MAX_GUID_STRING_LEN     sizeof("{12345678-1234-1234-0123-456789abcdef}")
+#define MAX_GUID_STRING_LEN   RTL_NUMBER_OF("{12345678-1234-1234-0123-456789abcdef}")
+C_ASSERT(MAX_GUID_STRING_LEN == 39); // See psdk/cfgmgr32.h
 
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(StatCode)  ((NTSTATUS)(StatCode) >= 0)
@@ -290,7 +291,6 @@ BOOL WINAPI SdbRegisterDatabaseEx(
     if (!SdbGUIDToString(&Information.Id, GuidBuffer, RTL_NUMBER_OF(GuidBuffer)))
     {
         SHIM_ERR("Unable to Convert GUID to string\n");
-        SdbFreeDatabaseInformation(&Information);
         SdbCloseDatabase(pdb);
         return FALSE;
     }
@@ -373,7 +373,6 @@ BOOL WINAPI SdbRegisterDatabaseEx(
         SHIM_ERR("Unable to create key %wZ\n", &KeyName);
     }
 
-    SdbFreeDatabaseInformation(&Information);
     SdbCloseDatabase(pdb);
 
     return NT_SUCCESS(Status);
@@ -405,7 +404,7 @@ BOOL WINAPI SdbRegisterDatabase(
  */
 BOOL WINAPI SdbUnregisterDatabase(_In_ const GUID *pguidDB)
 {
-    WCHAR KeyBuffer[MAX_PATH], GuidBuffer[50];
+    WCHAR KeyBuffer[MAX_PATH], GuidBuffer[MAX_GUID_STRING_LEN];
     UNICODE_STRING KeyName;
     ACCESS_MASK KeyAccess;
     OBJECT_ATTRIBUTES ObjectKey = RTL_INIT_OBJECT_ATTRIBUTES(&KeyName, OBJ_CASE_INSENSITIVE);

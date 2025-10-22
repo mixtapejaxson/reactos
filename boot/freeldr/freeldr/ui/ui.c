@@ -22,8 +22,6 @@
 #include <debug.h>
 DBG_DEFAULT_CHANNEL(UI);
 
-#ifndef _M_ARM
-
 UCHAR UiStatusBarFgColor;       // Status bar foreground color
 UCHAR UiStatusBarBgColor;       // Status bar background color
 UCHAR UiBackdropFgColor;        // Backdrop foreground color
@@ -56,16 +54,12 @@ const PCSTR UiMonthNames[12] = { "January", "February", "March", "April", "May",
 ULONG UiScreenWidth;    // Screen Width
 ULONG UiScreenHeight;   // Screen Height
 
-#endif // _M_ARM
-
 /*
  * Loading progress bar, based on the NTOS Inbv one.
  * Supports progress within sub-ranges, used when loading
  * with an unknown number of steps.
  */
 UI_PROGRESS_BAR UiProgressBar = {{0}};
-
-#ifndef _M_ARM
 
 UIVTBL UiVtbl =
 {
@@ -229,16 +223,16 @@ BOOLEAN UiInitialize(BOOLEAN ShowUi)
 
 VOID UiUnInitialize(PCSTR BootText)
 {
-    UiDrawBackdrop();
+    UiDrawBackdrop(UiGetScreenHeight());
     UiDrawStatusText(BootText);
     UiInfoBox(BootText);
 
     UiVtbl.UnInitialize();
 }
 
-VOID UiDrawBackdrop(VOID)
+VOID UiDrawBackdrop(ULONG DrawHeight)
 {
-    UiVtbl.DrawBackdrop();
+    UiVtbl.DrawBackdrop(DrawHeight);
 }
 
 VOID UiFillArea(ULONG Left, ULONG Top, ULONG Right, ULONG Bottom, CHAR FillChar, UCHAR Attr /* Color Attributes */)
@@ -299,22 +293,24 @@ VOID UiUpdateDateTime(VOID)
     UiVtbl.UpdateDateTime();
 }
 
-VOID UiInfoBox(PCSTR MessageText)
+VOID
+UiInfoBox(
+    _In_ PCSTR MessageText)
 {
-    SIZE_T        TextLength;
-    ULONG        BoxWidth;
-    ULONG        BoxHeight;
-    ULONG        LineBreakCount;
-    SIZE_T        Index;
-    SIZE_T        LastIndex;
-    ULONG        Left;
-    ULONG        Top;
-    ULONG        Right;
-    ULONG        Bottom;
+    SIZE_T TextLength;
+    ULONG  BoxWidth;
+    ULONG  BoxHeight;
+    ULONG  LineBreakCount;
+    SIZE_T Index;
+    SIZE_T LastIndex;
+    ULONG  Left;
+    ULONG  Top;
+    ULONG  Right;
+    ULONG  Bottom;
 
     TextLength = strlen(MessageText);
 
-    // Count the new lines and the box width
+    /* Count the new lines and the box width */
     LineBreakCount = 0;
     BoxWidth = 0;
     LastIndex = 0;
@@ -334,17 +330,17 @@ VOID UiInfoBox(PCSTR MessageText)
         }
     }
 
-    // Calc the box width & height
+    /* Calc the box width & height */
     BoxWidth += 6;
     BoxHeight = LineBreakCount + 4;
 
-    // Calc the box coordinates
+    /* Calc the box coordinates */
     Left = (UiScreenWidth / 2) - (BoxWidth / 2);
-    Top =(UiScreenHeight / 2) - (BoxHeight / 2);
-    Right = (UiScreenWidth / 2) + (BoxWidth / 2);
+    Top  = (UiScreenHeight / 2) - (BoxHeight / 2);
+    Right  = (UiScreenWidth / 2) + (BoxWidth / 2);
     Bottom = (UiScreenHeight / 2) + (BoxHeight / 2);
 
-    // Draw the box
+    /* Draw the box */
     UiDrawBox(Left,
               Top,
               Right,
@@ -353,25 +349,28 @@ VOID UiInfoBox(PCSTR MessageText)
               HORZ,
               TRUE,
               TRUE,
-              ATTR(UiMenuFgColor, UiMenuBgColor)
-              );
+              ATTR(UiMenuFgColor, UiMenuBgColor));
 
-    // Draw the text
+    /* Draw the text */
     UiDrawCenteredText(Left, Top, Right, Bottom, MessageText, ATTR(UiTextColor, UiMenuBgColor));
 }
 
-VOID UiMessageBox(PCSTR Format, ...)
+VOID
+UiMessageBox(
+    _In_ PCSTR Format, ...)
 {
-    CHAR Buffer[256];
     va_list ap;
+    CHAR Buffer[1024];
 
     va_start(ap, Format);
-    vsnprintf(Buffer, sizeof(Buffer) - sizeof(CHAR), Format, ap);
+    _vsnprintf(Buffer, sizeof(Buffer) - sizeof(CHAR), Format, ap);
     UiVtbl.MessageBox(Buffer);
     va_end(ap);
 }
 
-VOID UiMessageBoxCritical(PCSTR MessageText)
+VOID
+UiMessageBoxCritical(
+    _In_ PCSTR MessageText)
 {
     UiVtbl.MessageBoxCritical(MessageText);
 }
@@ -385,8 +384,6 @@ UCHAR UiTextToFillStyle(PCSTR FillStyleText)
 {
     return UiVtbl.TextToFillStyle(FillStyleText);
 }
-
-#endif // _M_ARM
 
 VOID
 UiInitProgressBar(
@@ -413,13 +410,8 @@ UiInitProgressBar(
     UiProgressBar.Show = TRUE;
 
     /* Initial drawing: set the "Loading..." text and the original position */
-#ifndef _M_ARM
     UiVtbl.SetProgressBarText(ProgressText);
     UiVtbl.TickProgressBar(0);
-#else
-    MiniTuiSetProgressBarText(ProgressText);
-    MiniTuiTickProgressBar(0);
-#endif
 }
 
 VOID
@@ -477,11 +469,7 @@ UiUpdateProgressBar(
     TotalProgress = UiProgressBar.State.Floor + (Percentage * UiProgressBar.State.Bias);
     // TotalProgress /= (100 * 100);
 
-#ifndef _M_ARM
     UiVtbl.TickProgressBar(TotalProgress);
-#else
-    MiniTuiTickProgressBar(TotalProgress);
-#endif
 }
 
 VOID
@@ -492,22 +480,14 @@ UiSetProgressBarText(
     if (!UiProgressBar.Show)
         return;
 
-#ifndef _M_ARM
     UiVtbl.SetProgressBarText(ProgressText);
-#else
-    MiniTuiSetProgressBarText(ProgressText);
-#endif
 }
 
 VOID
 UiDrawProgressBarCenter(
     _In_ PCSTR ProgressText)
 {
-#ifndef _M_ARM
     UiVtbl.DrawProgressBarCenter(ProgressText);
-#else
-    MiniTuiDrawProgressBarCenter(ProgressText);
-#endif
 }
 
 VOID
@@ -518,14 +498,8 @@ UiDrawProgressBar(
     _In_ ULONG Bottom,
     _In_ PCSTR ProgressText)
 {
-#ifndef _M_ARM
     UiVtbl.DrawProgressBar(Left, Top, Right, Bottom, ProgressText);
-#else
-    MiniTuiDrawProgressBar(Left, Top, Right, Bottom, ProgressText);
-#endif
 }
-
-#ifndef _M_ARM
 
 static VOID
 UiEscapeString(PCHAR String)
@@ -631,7 +605,6 @@ BOOLEAN
 UiDisplayMenu(
     IN PCSTR MenuHeader,
     IN PCSTR MenuFooter OPTIONAL,
-    IN BOOLEAN ShowBootOptions,
     IN PCSTR MenuItemList[],
     IN ULONG MenuItemCount,
     IN ULONG DefaultMenuItem,
@@ -641,7 +614,7 @@ UiDisplayMenu(
     IN UiMenuKeyPressFilterCallback KeyPressFilter OPTIONAL,
     IN PVOID Context OPTIONAL)
 {
-    return UiVtbl.DisplayMenu(MenuHeader, MenuFooter, ShowBootOptions,
+    return UiVtbl.DisplayMenu(MenuHeader, MenuFooter,
                               MenuItemList, MenuItemCount, DefaultMenuItem,
                               MenuTimeOut, SelectedMenuItem, CanEscape,
                               KeyPressFilter, Context);
@@ -662,9 +635,32 @@ BOOLEAN UiEditBox(PCSTR MessageText, PCHAR EditTextBuffer, ULONG Length)
     return UiVtbl.EditBox(MessageText, EditTextBuffer, Length);
 }
 
-#else
-BOOLEAN UiEditBox(PCSTR MessageText, PCHAR EditTextBuffer, ULONG Length)
+VOID
+UiResetForSOS(VOID)
 {
-    return FALSE;
-}
+#ifdef _M_ARM
+    /* Re-initialize the UI */
+    UiInitialize(TRUE);
+#else
+    /* Reset the UI and switch to MiniTui */
+    UiVtbl.UnInitialize();
+    UiVtbl = MiniTuiVtbl;
+    UiVtbl.Initialize();
 #endif
+    /* Disable the progress bar */
+    UiProgressBar.Show = FALSE;
+}
+
+ULONG
+UiGetScreenHeight(VOID)
+{
+    return UiScreenHeight;
+}
+
+UCHAR
+UiGetMenuBgColor(VOID)
+{
+    return UiMenuBgColor;
+}
+
+/* EOF */
